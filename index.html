@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Queue Statistics Widget - Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+      color: #e4e7eb;
+    }
+
+    .demo-container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .demo-header {
+      text-align: center;
+      margin-bottom: 60px;
+    }
+
+    .demo-header h1 {
+      font-size: 42px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .demo-header p {
+      font-size: 18px;
+      color: #94a3b8;
+      max-width: 600px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      margin: 0 4px;
+    }
+
+    .status-badge.live {
+      background: rgba(16, 185, 129, 0.2);
+      color: #10b981;
+    }
+
+    .config-panel {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 40px;
+    }
+
+    .config-panel h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: #f1f5f9;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .config-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+    }
+
+    .config-item {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .config-item label {
+      font-size: 12px;
+      font-weight: 500;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .config-item input {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: #f1f5f9;
+      font-size: 14px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .config-item input:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+
+    .demo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 30px;
+      margin-bottom: 60px;
+    }
+
+    .demo-card {
+      background: rgba(30, 41, 59, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 24px;
+      backdrop-filter: blur(10px);
+    }
+
+    .demo-card h2 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #f1f5f9;
+    }
+
+    .demo-card p {
+      font-size: 14px;
+      color: #94a3b8;
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+
+    .legend {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 24px;
+      margin-top: 40px;
+    }
+
+    .legend h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: #f1f5f9;
+    }
+
+    .legend-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      background: rgba(30, 41, 59, 0.5);
+      border-radius: 8px;
+    }
+
+    .legend-indicator {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+
+    .legend-indicator.ok {
+      background: #10b981;
+    }
+
+    .legend-indicator.warning {
+      background: #f59e0b;
+    }
+
+    .legend-indicator.critical {
+      background: #ef4444;
+    }
+
+    .legend-text {
+      flex: 1;
+    }
+
+    .legend-text strong {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 2px;
+      color: #f1f5f9;
+    }
+
+    .legend-text span {
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    @media (max-width: 768px) {
+      .demo-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .demo-header h1 {
+        font-size: 32px;
+      }
+
+      .config-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+  <script type="module" crossorigin src="/index.js"></script>
+</head>
+<body>
+  <div class="demo-container">
+    <div class="demo-header">
+      <h1>🎯 Queue Statistics Widget</h1>
+      <p>
+        Modern, real-time queue monitoring for Webex Contact Center agents.
+        <span class="status-badge live">● LIVE DEMO</span>
+      </p>
+    </div>
+
+    <div class="config-panel">
+      <h3>⚙️ Threshold Configuration</h3>
+      <div class="config-grid">
+        <div class="config-item">
+          <label>Contacts Warning</label>
+          <input type="number" id="contactsWarning" value="5" min="1" max="100">
+        </div>
+        <div class="config-item">
+          <label>Contacts Critical</label>
+          <input type="number" id="contactsCritical" value="10" min="1" max="100">
+        </div>
+        <div class="config-item">
+          <label>Wait Warning (sec)</label>
+          <input type="number" id="waitWarning" value="120" min="10" max="3600">
+        </div>
+        <div class="config-item">
+          <label>Wait Critical (sec)</label>
+          <input type="number" id="waitCritical" value="300" min="10" max="3600">
+        </div>
+      </div>
+    </div>
+
+    <div class="demo-grid">
+      <!-- Normal State -->
+      <div class="demo-card">
+        <h2>✅ Normal State</h2>
+        <p>All metrics within acceptable thresholds. Green indicators show healthy queue status.</p>
+        <queue-statistics-modern 
+          id="widget-normal"
+          demoMode
+        ></queue-statistics-modern>
+      </div>
+
+      <!-- Warning State -->
+      <div class="demo-card">
+        <h2>⚠️ Warning State</h2>
+        <p>Queue metrics approaching critical levels. Amber indicators with subtle pulsing.</p>
+        <queue-statistics-modern 
+          id="widget-warning"
+          demoMode
+        ></queue-statistics-modern>
+      </div>
+
+      <!-- Critical State -->
+      <div class="demo-card">
+        <h2>🔴 Critical State</h2>
+        <p>Queue metrics exceed critical thresholds. Red indicators with prominent pulsing animation.</p>
+        <queue-statistics-modern 
+          id="widget-critical"
+          demoMode
+        ></queue-statistics-modern>
+      </div>
+    </div>
+
+    <div class="legend">
+      <h3>📖 Status Indicators</h3>
+      <div class="legend-grid">
+        <div class="legend-item">
+          <div class="legend-indicator ok"></div>
+          <div class="legend-text">
+            <strong>Normal (Green)</strong>
+            <span>All metrics within acceptable range</span>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="legend-indicator warning"></div>
+          <div class="legend-text">
+            <strong>Warning (Amber)</strong>
+            <span>Metrics approaching critical levels</span>
+          </div>
+        </div>
+        <div class="legend-item">
+          <div class="legend-indicator critical"></div>
+          <div class="legend-text">
+            <strong>Critical (Red)</strong>
+            <span>Immediate attention required</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import the component -->
+  
+</body>
+</html>
