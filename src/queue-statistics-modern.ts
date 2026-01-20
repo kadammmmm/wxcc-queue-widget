@@ -46,12 +46,11 @@ export class QueueStatisticsModern extends LitElement {
 
   // === STYLES ===
   static styles = css`
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;600;700&display=swap');
 
     :host {
       display: block;
       width: 100%;
-      font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --primary-bg: #0f1419;
       --card-bg: #1a1f2e;
       --card-hover: #232937;
@@ -344,7 +343,7 @@ export class QueueStatisticsModern extends LitElement {
     }
 
     .metric-value {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: 'Consolas', 'Monaco', monospace;
       font-size: 20px;
       font-weight: 700;
       color: var(--text-primary);
