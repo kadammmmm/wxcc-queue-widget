@@ -1,20 +1,21 @@
-import { defineConfig } from "vite";
-import { nodePolyfills } from 'vite-plugin-node-polyfills'
+import { defineConfig } from 'vite';
+import { resolve } from 'path';
 
 export default defineConfig({
-    build:{
-        rollupOptions:{
-            output:{
-                entryFileNames:"[name].js",
-                chunkFileNames:"[name].js",
-                assetFileNames:"[name].[ext]"
-            }
-        }
+  build: {
+    lib: {
+      entry: resolve(__dirname, 'src/queue-statistics-modern.ts'),
+      name: 'QueueStatisticsModern',
+      fileName: 'index',
+      formats: ['es']
     },
-    plugins: [
-    nodePolyfills({
-      // Whether to polyfill `node:` protocol imports.
-      protocolImports: true,
-    }),
-  ]
-})
+    rollupOptions: {
+      external: [],
+      output: {
+        globals: {}
+      }
+    },
+    sourcemap: false,
+    minify: 'terser'
+  }
+});
