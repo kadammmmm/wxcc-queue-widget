@@ -25,7 +25,6 @@ export class QueueStatisticsCompact extends LitElement {
 
   // === STATE ===
   @state() private queueStats: any[] = [];
-  @state() private queueFilter: object[] = [];
   @state() queueData?: any;
   @state() private _dataRefreshTimer?: any;
   @state() private _uiRefreshTimer?: any;
@@ -189,50 +188,12 @@ export class QueueStatisticsCompact extends LitElement {
 
   // === API METHODS ===
   private async getQueues() {
-    const headers = {
-      'Authorization': `Bearer ${this.token}`,
-      'Content-Type': 'application/json'
-    };
-
-    const paths = [
-      `/v2/contact-service-queue/by-user-id/${this.agentId}/agent-based-queues`,
-      `/v2/contact-service-queue/by-user-id/${this.agentId}/skill-based-queues`,
-      `/team/${this.teamId}/incoming-references`
-    ];
-
-    this.queueFilter = [];
-
-    const promises = paths.map(async (path) => {
-      try {
-        const response = await fetch(
-          `https://api.wxcc-us1.cisco.com/organization/${this.orgId}${path}`,
-          { method: 'GET', headers, redirect: 'follow' }
-        );
-        const result = await response.json();
-        
-        if (result.data) {
-          const queues = Array.isArray(result.data) ? result.data : [result.data];
-          return queues.map((q: any) => ({ queueId: { equals: q.id } }));
-        }
-      } catch (error) {
-        console.error('Error fetching queues:', error);
-      }
-      return [];
-    });
-
-    const results = await Promise.all(promises);
-    this.queueFilter = results.flat();
-
-    if (this.queueFilter.length > 0) {
-      await this.getStats();
-    } else {
-      this.isLoading = false;
-    }
+    // Skip queue fetching - we'll query ALL parked contacts and group by queue
+    // This works even if agent has no queue assignments
+    await this.getStats();
   }
 
   private async getStats() {
-    if (!this.queueFilter.length) return;
-
     const headers = {
       'Authorization': `Bearer ${this.token}`,
       'Content-Type': 'application/json'
@@ -250,8 +211,8 @@ export class QueueStatisticsCompact extends LitElement {
         filter: {
           and: [
             { isActive: { equals: true } },
-            { status: { equals: "parked" } },
-            { or: this.queueFilter }
+            { status: { equals: "parked" } }
+            // No queue filter - get ALL parked contacts
           ]
         },
         aggregation: [
