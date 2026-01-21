@@ -1,22 +1,21 @@
 import { defineConfig } from 'vite';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export default defineConfig({
   build: {
     lib: {
-      entry: path.resolve(__dirname, 'src/queue-statistics-compact.ts'),
+      entry: './src/queue-statistics-compact.ts',
       name: 'QueueStatisticsCompact',
-      fileName: 'index',
-      formats: ['es']
+      fileName: () => 'index.js',
+      formats: ['iife']
     },
     rollupOptions: {
       external: [],
       output: {
-        globals: {}
+        inlineDynamicImports: true,
+        format: 'iife',
+        name: 'QueueStatisticsCompact',
+        globals: {},
+        extend: true
       }
     },
     sourcemap: false,
