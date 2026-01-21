@@ -33,6 +33,7 @@ export class QueueStatisticsCompact extends LitElement {
   @state() private hasError: boolean = false;
   @state() private expandedQueue: string | null = null;
   @state() private lastUpdated: Date = new Date();
+  @state() private panelPosition: { top: number; left: number } = { top: 0, left: 0 };
 
   // === STYLES ===
   static styles = css`
@@ -175,20 +176,19 @@ export class QueueStatisticsCompact extends LitElement {
       left: 0;
       right: 0;
       bottom: 0;
-      z-index: 999;
+      z-index: 9999;
+      background: transparent;
     }
 
     .overlay-panel {
-      position: absolute;
-      top: 52px;
-      left: 0;
+      position: fixed;
       min-width: 320px;
       max-width: 420px;
       background: linear-gradient(165deg, #1a1f2e 0%, #0f1419 100%);
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 12px;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
-      z-index: 1000;
+      z-index: 10000;
       overflow: hidden;
       animation: slideDown 0.2s ease-out;
     }
@@ -642,7 +642,7 @@ export class QueueStatisticsCompact extends LitElement {
         }
 
         // Sort contacts by wait time (oldest first)
-        for (const [, contacts] of contactsByQueue) {
+        for (const [queue, contacts] of contactsByQueue) {
           contacts.sort((a, b) => a.createdTime - b.createdTime);
         }
 
@@ -716,7 +716,22 @@ export class QueueStatisticsCompact extends LitElement {
 
   private toggleQueue(queueName: string, e: Event) {
     e.stopPropagation();
-    this.expandedQueue = this.expandedQueue === queueName ? null : queueName;
+    
+    if (this.expandedQueue === queueName) {
+      this.expandedQueue = null;
+    } else {
+      // Calculate position based on clicked element
+      const target = e.currentTarget as HTMLElement;
+      const rect = target.getBoundingClientRect();
+      
+      // Position panel below the clicked queue item
+      this.panelPosition = {
+        top: rect.bottom + 8,
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - 340))
+      };
+      
+      this.expandedQueue = queueName;
+    }
   }
 
   private closePanel() {
@@ -764,6 +779,10 @@ export class QueueStatisticsCompact extends LitElement {
       ? this.queueDetails.get(this.expandedQueue) || []
       : [];
 
+    const expandedQueueData = this.expandedQueue 
+      ? this.queueStats.find(q => q.name === this.expandedQueue)
+      : null;
+
     return html`
       <div class="container">
         ${this.queueStats.map(queue => html`
@@ -778,73 +797,78 @@ export class QueueStatisticsCompact extends LitElement {
               <span class="metric">⏱️ ${this.formatWaitTime(queue.waitTimeSeconds)}</span>
             </div>
             <span class="expand-icon">▼</span>
-
-            ${this.expandedQueue === queue.name ? html`
-              <div class="overlay-panel" @click=${(e: Event) => e.stopPropagation()}>
-                <div class="panel-header">
-                  <div class="panel-title">
-                    <span class="panel-title-text">${queue.name}</span>
-                    <span class="panel-status-badge ${queue.status}">${queue.status}</span>
-                  </div>
-                  <button class="close-btn" @click=${() => this.closePanel()}>✕</button>
-                </div>
-
-                <div class="panel-content">
-                  <div class="stats-grid">
-                    <div class="stat-card">
-                      <div class="stat-value ${queue.contacts >= this.contactsCritical ? 'critical' : queue.contacts >= this.contactsWarning ? 'warning' : ''}">${queue.contacts}</div>
-                      <div class="stat-label">Waiting</div>
-                    </div>
-                    <div class="stat-card">
-                      <div class="stat-value ${this.getWaitTimeStatus(queue.waitTimeSeconds)}">${this.formatLongWaitTime(queue.waitTimeSeconds)}</div>
-                      <div class="stat-label">Longest Wait</div>
-                    </div>
-                  </div>
-
-                  <div class="contacts-section">
-                    <div class="section-header">
-                      <span class="section-title">Contacts in Queue</span>
-                    </div>
-                    
-                    ${expandedContacts.length > 0 ? html`
-                      <div class="contacts-list">
-                        ${expandedContacts.map(contact => {
-                          const waitSeconds = Math.floor((Date.now() - contact.createdTime) / 1000);
-                          return html`
-                            <div class="contact-item">
-                              <div class="contact-info">
-                                <div class="contact-icon">${this.getChannelIcon(contact.channelType)}</div>
-                                <div class="contact-details">
-                                  <span class="contact-id">${this.formatOrigin(contact.origin)}</span>
-                                  <span class="contact-channel">${contact.channelType || 'Voice'}</span>
-                                </div>
-                              </div>
-                              <div class="contact-wait">
-                                <span class="wait-time ${this.getWaitTimeStatus(waitSeconds)}">${this.formatLongWaitTime(waitSeconds)}</span>
-                                <span class="wait-label">waiting</span>
-                              </div>
-                            </div>
-                          `;
-                        })}
-                      </div>
-                    ` : html`
-                      <div class="no-contacts">
-                        <div class="no-contacts-icon">📭</div>
-                        <div>No contacts waiting</div>
-                      </div>
-                    `}
-                  </div>
-                </div>
-
-                <div class="panel-footer">
-                  <span class="last-updated">Updated ${this.lastUpdated.toLocaleTimeString()}</span>
-                  <button class="refresh-btn" @click=${() => this.refreshData()}>↻ Refresh</button>
-                </div>
-              </div>
-            ` : ''}
           </div>
         `)}
       </div>
+
+      ${this.expandedQueue && expandedQueueData ? html`
+        <div class="overlay-backdrop" @click=${() => this.closePanel()}></div>
+        <div 
+          class="overlay-panel" 
+          style="top: ${this.panelPosition.top}px; left: ${this.panelPosition.left}px;"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="panel-header">
+            <div class="panel-title">
+              <span class="panel-title-text">${expandedQueueData.name}</span>
+              <span class="panel-status-badge ${expandedQueueData.status}">${expandedQueueData.status}</span>
+            </div>
+            <button class="close-btn" @click=${() => this.closePanel()}>✕</button>
+          </div>
+
+          <div class="panel-content">
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-value ${expandedQueueData.contacts >= this.contactsCritical ? 'critical' : expandedQueueData.contacts >= this.contactsWarning ? 'warning' : ''}">${expandedQueueData.contacts}</div>
+                <div class="stat-label">Waiting</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-value ${this.getWaitTimeStatus(expandedQueueData.waitTimeSeconds)}">${this.formatLongWaitTime(expandedQueueData.waitTimeSeconds)}</div>
+                <div class="stat-label">Longest Wait</div>
+              </div>
+            </div>
+
+            <div class="contacts-section">
+              <div class="section-header">
+                <span class="section-title">Contacts in Queue</span>
+              </div>
+              
+              ${expandedContacts.length > 0 ? html`
+                <div class="contacts-list">
+                  ${expandedContacts.map(contact => {
+                    const waitSeconds = Math.floor((Date.now() - contact.createdTime) / 1000);
+                    return html`
+                      <div class="contact-item">
+                        <div class="contact-info">
+                          <div class="contact-icon">${this.getChannelIcon(contact.channelType)}</div>
+                          <div class="contact-details">
+                            <span class="contact-id">${this.formatOrigin(contact.origin)}</span>
+                            <span class="contact-channel">${contact.channelType || 'Voice'}</span>
+                          </div>
+                        </div>
+                        <div class="contact-wait">
+                          <span class="wait-time ${this.getWaitTimeStatus(waitSeconds)}">${this.formatLongWaitTime(waitSeconds)}</span>
+                          <span class="wait-label">waiting</span>
+                        </div>
+                      </div>
+                    `;
+                  })}
+                </div>
+              ` : html`
+                <div class="no-contacts">
+                  <div class="no-contacts-icon">📭</div>
+                  <div>No contacts waiting</div>
+                </div>
+              `}
+            </div>
+          </div>
+
+          <div class="panel-footer">
+            <span class="last-updated">Updated ${this.lastUpdated.toLocaleTimeString()}</span>
+            <button class="refresh-btn" @click=${() => this.refreshData()}>↻ Refresh</button>
+          </div>
+        </div>
+      ` : ''}
     `;
   }
 }
