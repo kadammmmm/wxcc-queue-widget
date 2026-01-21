@@ -199,27 +199,34 @@ export class QueueStatisticsCompact extends LitElement {
       'Content-Type': 'application/json'
     };
 
+    // Calculate time range
+    const now = Date.now();
+    const from = now - 86400000; // 24 hours ago
+
+    // Build the GraphQL query with aggregations as direct arguments (NOT as variables)
+    // This is the correct syntax for the Webex CC Search API
     const graphqlQuery = {
-      query: `query($from: Long!, $to: Long!, $filter: TaskFilters, $aggregation: [TaskAggregation]) {
-        task(from: $from, to: $to, filter: $filter, aggregation: $aggregation) {
-          tasks { lastQueue { name } aggregation { name value } }
-        }
-      }`,
-      variables: {
-        from: `${Date.now() - 86400000}`,
-        to: `${Date.now()}`,
-        filter: {
-          and: [
-            { isActive: { equals: true } },
-            { status: { equals: "parked" } }
-            // No queue filter - get ALL parked contacts
+      query: `{
+        task(
+          from: ${from}
+          to: ${now}
+          filter: {
+            and: [
+              { isActive: { equals: true } }
+              { status: { equals: "parked" } }
+            ]
+          }
+          aggregations: [
+            { field: "id", type: count, name: "contacts" }
+            { field: "createdTime", type: min, name: "oldestStart" }
           ]
-        },
-        aggregation: [
-          { field: "id", type: "count", name: "contacts" },
-          { field: "createdTime", type: "min", name: "oldestStart" }
-        ]
-      }
+        ) {
+          tasks {
+            lastQueue { name }
+            aggregation { name value }
+          }
+        }
+      }`
     };
 
     try {
@@ -232,15 +239,31 @@ export class QueueStatisticsCompact extends LitElement {
       
       const result = await response.json();
       
+      // Check for GraphQL errors
+      if (result.error || result.errors) {
+        const errorMsg = result.error?.message?.[0]?.description || 
+                         result.errors?.[0]?.message || 
+                         JSON.stringify(result.error || result.errors);
+        console.error('GraphQL error:', errorMsg);
+        this.hasError = true;
+        this.isLoading = false;
+        return;
+      }
+      
       if (result.data?.task?.tasks) {
         this.queueData = result.data.task.tasks;
+        this.updateTemplate();
+        this.isLoading = false;
+        this.hasError = false;
+      } else {
+        // No data but no error - might be empty results
+        this.queueData = [];
         this.updateTemplate();
         this.isLoading = false;
         this.hasError = false;
       }
     } catch (error) {
       this.hasError = true;
-      console.error('Error fetching stats:', error);
     }
   }
 
@@ -297,7 +320,7 @@ export class QueueStatisticsCompact extends LitElement {
     }
 
     if (this.queueStats.length === 0) {
-      return html`<div class="container"><div class="empty">All queues clear ✓</div></div>`;
+      return html`<div class="container"><div class="empty">All queues clear ✔</div></div>`;
     }
 
     return html`
