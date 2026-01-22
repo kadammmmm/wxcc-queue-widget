@@ -27,6 +27,7 @@ export class QueueStatisticsCompact extends LitElement {
   @state() private queueStats: any[] = [];
   @state() queueData?: any;
   @state() private queueDetails: Map<string, any[]> = new Map();
+  @state() private queueHistory: Map<string, number[]> = new Map(); // Sparkline data
   @state() private _dataRefreshTimer?: any;
   @state() private _uiRefreshTimer?: any;
   @state() isLoading: boolean = true;
@@ -34,6 +35,9 @@ export class QueueStatisticsCompact extends LitElement {
   @state() private expandedQueue: string | null = null;
   @state() private lastUpdated: Date = new Date();
   @state() private panelPosition: { top: number; left: number } = { top: 0, left: 0 };
+  
+  // Sparkline settings
+  private readonly SPARKLINE_MAX_POINTS = 20; // 20 points × 30s = 10 minutes of history
 
   // === STYLES ===
   static styles = css`
@@ -149,6 +153,57 @@ export class QueueStatisticsCompact extends LitElement {
       align-items: center;
       gap: 4px;
     }
+
+    /* Sparkline styles */
+    .sparkline-container {
+      display: flex;
+      align-items: center;
+      margin-left: 8px;
+      padding-left: 8px;
+      border-left: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .sparkline {
+      width: 50px;
+      height: 20px;
+    }
+
+    .sparkline-line {
+      fill: none;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .sparkline-line.ok { stroke: #10b981; }
+    .sparkline-line.warning { stroke: #f59e0b; }
+    .sparkline-line.critical { stroke: #ef4444; }
+
+    .sparkline-area {
+      opacity: 0.15;
+    }
+
+    .sparkline-area.ok { fill: #10b981; }
+    .sparkline-area.warning { fill: #f59e0b; }
+    .sparkline-area.critical { fill: #ef4444; }
+
+    .sparkline-dot {
+      r: 2;
+    }
+
+    .sparkline-dot.ok { fill: #10b981; }
+    .sparkline-dot.warning { fill: #f59e0b; }
+    .sparkline-dot.critical { fill: #ef4444; }
+
+    .trend-indicator {
+      font-size: 10px;
+      margin-left: 4px;
+      font-weight: 600;
+    }
+
+    .trend-indicator.up { color: #ef4444; }
+    .trend-indicator.down { color: #10b981; }
+    .trend-indicator.stable { color: #64748b; }
 
     .expand-icon {
       margin-left: 4px;
@@ -564,6 +619,7 @@ export class QueueStatisticsCompact extends LitElement {
         this.queueData = result.data.task.tasks;
         this.lastUpdated = new Date();
         this.updateTemplate();
+        this.updateSparklineHistory(); // Record data point for sparklines
         this.isLoading = false;
         this.hasError = false;
         
@@ -642,7 +698,7 @@ export class QueueStatisticsCompact extends LitElement {
         }
 
         // Sort contacts by wait time (oldest first)
-        for (const [, contacts] of contactsByQueue) {
+        for (const [queue, contacts] of contactsByQueue) {
           contacts.sort((a, b) => a.createdTime - b.createdTime);
         }
 
@@ -689,6 +745,112 @@ export class QueueStatisticsCompact extends LitElement {
       return 'warning';
     }
     return 'ok';
+  }
+
+  // === SPARKLINE METHODS ===
+  private updateSparklineHistory() {
+    for (const queue of this.queueStats) {
+      const history = this.queueHistory.get(queue.name) || [];
+      history.push(queue.contacts);
+      
+      // Keep only the last N data points
+      while (history.length > this.SPARKLINE_MAX_POINTS) {
+        history.shift();
+      }
+      
+      this.queueHistory.set(queue.name, history);
+    }
+    
+    // Trigger re-render
+    this.queueHistory = new Map(this.queueHistory);
+  }
+
+  private generateSparklinePath(queueName: string): { linePath: string; areaPath: string } {
+    const history = this.queueHistory.get(queueName) || [];
+    
+    if (history.length < 2) {
+      return { linePath: '', areaPath: '' };
+    }
+
+    const width = 50;
+    const height = 20;
+    const padding = 2;
+    
+    const maxVal = Math.max(...history, 1); // At least 1 to avoid division by zero
+    const minVal = 0;
+    const range = maxVal - minVal || 1;
+    
+    const points = history.map((val, i) => {
+      const x = padding + (i / (history.length - 1)) * (width - padding * 2);
+      const y = height - padding - ((val - minVal) / range) * (height - padding * 2);
+      return { x, y };
+    });
+
+    // Generate line path
+    const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+    
+    // Generate area path (closed shape for fill)
+    const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${height - padding} L ${padding} ${height - padding} Z`;
+
+    return { linePath, areaPath };
+  }
+
+  private getSparklineEndpoint(queueName: string): { x: number; y: number } | null {
+    const history = this.queueHistory.get(queueName) || [];
+    
+    if (history.length < 2) {
+      return null;
+    }
+
+    const width = 50;
+    const height = 20;
+    const padding = 2;
+    
+    const maxVal = Math.max(...history, 1);
+    const minVal = 0;
+    const range = maxVal - minVal || 1;
+    
+    const lastVal = history[history.length - 1];
+    const x = width - padding;
+    const y = height - padding - ((lastVal - minVal) / range) * (height - padding * 2);
+    
+    return { x, y };
+  }
+
+  private getTrend(queueName: string): 'up' | 'down' | 'stable' {
+    const history = this.queueHistory.get(queueName) || [];
+    
+    if (history.length < 3) {
+      return 'stable';
+    }
+
+    // Compare average of last 3 points vs previous 3 points
+    const recent = history.slice(-3);
+    const previous = history.slice(-6, -3);
+    
+    if (previous.length === 0) {
+      return 'stable';
+    }
+
+    const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
+    const previousAvg = previous.reduce((a, b) => a + b, 0) / previous.length;
+    
+    const threshold = 0.5; // Minimum difference to show trend
+    
+    if (recentAvg > previousAvg + threshold) {
+      return 'up';
+    } else if (recentAvg < previousAvg - threshold) {
+      return 'down';
+    }
+    return 'stable';
+  }
+
+  private getTrendIcon(trend: 'up' | 'down' | 'stable'): string {
+    switch (trend) {
+      case 'up': return '↑';
+      case 'down': return '↓';
+      default: return '→';
+    }
   }
 
   private formatWaitTime(seconds: number): string {
@@ -785,20 +947,39 @@ export class QueueStatisticsCompact extends LitElement {
 
     return html`
       <div class="container">
-        ${this.queueStats.map(queue => html`
-          <div 
-            class="queue-item ${queue.status} ${this.expandedQueue === queue.name ? 'expanded' : ''}"
-            @click=${(e: Event) => this.toggleQueue(queue.name, e)}
-          >
-            <div class="status-indicator ${queue.status}"></div>
-            <span class="queue-name">${queue.name}</span>
-            <div class="queue-metrics">
-              <span class="metric">👥 ${queue.contacts}</span>
-              <span class="metric">⏱️ ${this.formatWaitTime(queue.waitTimeSeconds)}</span>
+        ${this.queueStats.map(queue => {
+          const sparkline = this.generateSparklinePath(queue.name);
+          const endpoint = this.getSparklineEndpoint(queue.name);
+          const trend = this.getTrend(queue.name);
+          const hasHistory = (this.queueHistory.get(queue.name)?.length || 0) >= 2;
+          
+          return html`
+            <div 
+              class="queue-item ${queue.status} ${this.expandedQueue === queue.name ? 'expanded' : ''}"
+              @click=${(e: Event) => this.toggleQueue(queue.name, e)}
+            >
+              <div class="status-indicator ${queue.status}"></div>
+              <span class="queue-name">${queue.name}</span>
+              <div class="queue-metrics">
+                <span class="metric">👥 ${queue.contacts}</span>
+                <span class="metric">⏱️ ${this.formatWaitTime(queue.waitTimeSeconds)}</span>
+              </div>
+              ${hasHistory ? html`
+                <div class="sparkline-container">
+                  <svg class="sparkline" viewBox="0 0 50 20" preserveAspectRatio="none">
+                    <path class="sparkline-area ${queue.status}" d="${sparkline.areaPath}"></path>
+                    <path class="sparkline-line ${queue.status}" d="${sparkline.linePath}"></path>
+                    ${endpoint ? html`
+                      <circle class="sparkline-dot ${queue.status}" cx="${endpoint.x}" cy="${endpoint.y}" r="2"></circle>
+                    ` : ''}
+                  </svg>
+                  <span class="trend-indicator ${trend}">${this.getTrendIcon(trend)}</span>
+                </div>
+              ` : ''}
+              <span class="expand-icon">▼</span>
             </div>
-            <span class="expand-icon">▼</span>
-          </div>
-        `)}
+          `;
+        })}
       </div>
 
       ${this.expandedQueue && expandedQueueData ? html`
