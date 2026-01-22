@@ -698,7 +698,7 @@ export class QueueStatisticsCompact extends LitElement {
         }
 
         // Sort contacts by wait time (oldest first)
-        for (const [queue, contacts] of contactsByQueue) {
+        for (const [, contacts] of contactsByQueue) {
           contacts.sort((a, b) => a.createdTime - b.createdTime);
         }
 
