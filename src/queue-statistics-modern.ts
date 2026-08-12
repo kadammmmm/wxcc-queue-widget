@@ -3,14 +3,32 @@ import { property, state } from 'lit/decorators.js';
 
 /**
  * Modern Queue Statistics Widget for Webex Contact Center
- * 
+ *
  * Features:
  * - Real-time queue monitoring with auto-refresh
- * - Threshold-based visual alerts (green/amber/red)
- * - Smooth animations and micro-interactions
- * - Dark mode compatible design
+ * - Per-queue agent roster (name + live status) with graceful fallback
+ * - Threshold-based visual alerts (ok/warning/critical)
  * - Configurable warning and critical thresholds
+ *
+ * No caller/agent data is ever masked or anonymized here - if the API
+ * returns a name or number, it is shown as-is.
  */
+
+interface QueueStat {
+  id: string;
+  name: string;
+  contacts: number;
+  waitTimeSeconds: number;
+  status: 'ok' | 'warning' | 'critical';
+}
+
+interface AgentRosterEntry {
+  id: string;
+  name: string;
+  state: 'available' | 'oncall' | 'wrapup' | 'unknown';
+  stateDurationSeconds?: number;
+}
+
 export class QueueStatisticsModern extends LitElement {
   // === PROPERTIES (passed from Desktop Layout) ===
   @property() token?: string;
@@ -35,9 +53,15 @@ export class QueueStatisticsModern extends LitElement {
   @property({ type: Boolean }) demoMode: boolean = false;
 
   // === STATE (internal component data) ===
-  @state() private queueStats: any[] = [];
+  @state() private queueStats: QueueStat[] = [];
   @state() private queueFilter: object[] = [];
   @state() queueData?: any;  // Public for demo mode
+  // Per-queue agent roster, keyed by queue id.
+  //   undefined -> not yet fetched
+  //   null      -> fetch attempted but roster could not be obtained (show fallback, never fabricate agents)
+  //   []        -> fetch succeeded, no agents currently assigned
+  //   [...]     -> live roster
+  @state() agentRoster: Map<string, AgentRosterEntry[] | null> = new Map(); // Public for demo mode
   @state() private _dataRefreshTimer?: any;
   @state() private _uiRefreshTimer?: any;
   @state() isLoading: boolean = true;  // Public for demo mode
@@ -46,318 +70,249 @@ export class QueueStatisticsModern extends LitElement {
 
   // === STYLES ===
   static styles = css`
-
     :host {
       display: block;
       width: 100%;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      --primary-bg: #0f1419;
-      --card-bg: #1a1f2e;
-      --card-hover: #232937;
-      --text-primary: #e4e7eb;
-      --text-secondary: #8b92a5;
-      --text-muted: #5a6170;
-      --accent-blue: #3b82f6;
-      --status-ok: #10b981;
-      --status-warning: #f59e0b;
-      --status-critical: #ef4444;
-      --border-color: #2d3548;
-      --glow-ok: rgba(16, 185, 129, 0.2);
-      --glow-warning: rgba(245, 158, 11, 0.2);
-      --glow-critical: rgba(239, 68, 68, 0.2);
-    }
 
-    .container {
-      background: var(--primary-bg);
-      border-radius: 12px;
-      padding: 16px 20px;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3),
-                  0 2px 4px -1px rgba(0, 0, 0, 0.2);
-      position: relative;
-      overflow: hidden;
-    }
+      /* Palette - literal color values only */
+      --neutral-black: #000000;
+      --neutral-grey: #e8e8e8;
+      --neutral-grey-light: #f7f7f7;
+      --neutral-white: #ffffff;
+      --neutral-text-muted: #6b7280;
 
-    /* Subtle animated background gradient */
-    .container::before {
-      content: '';
-      position: absolute;
-      top: -50%;
-      left: -50%;
-      width: 200%;
-      height: 200%;
-      background: radial-gradient(
-        circle at 50% 50%,
-        rgba(59, 130, 246, 0.03) 0%,
-        transparent 50%
-      );
-      animation: rotate 20s linear infinite;
-      pointer-events: none;
-    }
+      --blue-600: #4f6fda;
+      --blue-400: #b8c8ff;
+      --blue-200: #f2f5ff;
 
-    @keyframes rotate {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
+      --lblue-600: #42b1ff;
+      --lblue-400: #aedbfb;
+      --lblue-200: #f6fbff;
 
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 16px;
-      position: relative;
-      z-index: 1;
-    }
-
-    .title {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 14px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      color: var(--text-primary);
-    }
-
-    .title-icon {
-      width: 20px;
-      height: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--accent-blue);
-      border-radius: 6px;
-      font-size: 12px;
-    }
-
-    .status-indicator {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--status-ok);
-      animation: pulse 2s ease-in-out infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
+      --pink-600: #ffa5fb;
+      --orange-600: #ff8a30;
+      --red-600: #ff5c5f;
+      --yellow-600: #ffbc2a;
+      --turquoise-600: #00dadf;
     }
 
     .queues-container {
-      display: grid;
-      gap: 12px;
-      position: relative;
-      z-index: 1;
-      max-height: 400px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-height: 100%;
       overflow-y: auto;
-      padding-right: 4px;
+      padding: 2px;
     }
 
-    /* Custom scrollbar */
     .queues-container::-webkit-scrollbar {
       width: 6px;
     }
 
     .queues-container::-webkit-scrollbar-track {
-      background: var(--card-bg);
+      background: var(--neutral-grey-light);
       border-radius: 3px;
     }
 
     .queues-container::-webkit-scrollbar-thumb {
-      background: var(--border-color);
+      background: var(--neutral-grey);
       border-radius: 3px;
     }
 
-    .queues-container::-webkit-scrollbar-thumb:hover {
-      background: var(--text-muted);
-    }
-
     .queue-card {
-      background: var(--card-bg);
-      border: 1px solid var(--border-color);
-      border-radius: 10px;
-      padding: 14px 16px;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      position: relative;
+      background: var(--neutral-white);
+      border: 2px solid var(--neutral-black);
+      border-radius: 16px;
       overflow: hidden;
-      animation: slideIn 0.4s ease-out backwards;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+      animation: slideIn 0.3s ease-out backwards;
     }
 
     @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
-    .queue-card:hover {
-      background: var(--card-hover);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 16px -4px rgba(0, 0, 0, 0.4);
-    }
-
-    /* Status glow effect based on threshold */
-    .queue-card.status-ok {
-      border-left: 3px solid var(--status-ok);
-    }
-
-    .queue-card.status-ok::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(90deg, var(--glow-ok) 0%, transparent 100%);
-      pointer-events: none;
-    }
-
-    .queue-card.status-warning {
-      border-left: 3px solid var(--status-warning);
-      animation: warningPulse 2s ease-in-out infinite;
-    }
-
-    .queue-card.status-warning::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(90deg, var(--glow-warning) 0%, transparent 100%);
-      pointer-events: none;
-    }
-
-    @keyframes warningPulse {
-      0%, 100% { box-shadow: 0 0 0 0 var(--glow-warning); }
-      50% { box-shadow: 0 0 20px 0 var(--glow-warning); }
-    }
-
-    .queue-card.status-critical {
-      border-left: 3px solid var(--status-critical);
-      animation: criticalPulse 1s ease-in-out infinite;
-    }
-
-    .queue-card.status-critical::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(90deg, var(--glow-critical) 0%, transparent 100%);
-      pointer-events: none;
-    }
-
-    @keyframes criticalPulse {
-      0%, 100% {
-        box-shadow: 0 0 0 0 var(--glow-critical);
-        border-left-color: var(--status-critical);
-      }
-      50% {
-        box-shadow: 0 0 30px 0 var(--glow-critical);
-        border-left-color: #ff6b6b;
-      }
-    }
-
-    .queue-header {
+    .card-header {
+      background: var(--neutral-black);
+      color: var(--neutral-white);
+      padding: 14px 20px;
       display: flex;
       justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 12px;
-      position: relative;
-      z-index: 1;
-    }
-
-    .queue-name {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text-primary);
-      letter-spacing: -0.2px;
-      line-height: 1.4;
-    }
-
-    .queue-badge {
-      display: inline-flex;
       align-items: center;
-      gap: 4px;
-      padding: 3px 8px;
-      border-radius: 6px;
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
+    }
+
+    .queue-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 700;
       letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--turquoise-600);
+      animation: pulse 2s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .live-badge {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: var(--turquoise-600);
+    }
+
+    .card-body {
+      padding: 18px 20px 20px;
+    }
+
+    .waiting-now-box {
+      border: 2px solid var(--neutral-black);
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-bottom: 14px;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--neutral-black);
+      opacity: 0.7;
+    }
+
+    .waiting-now-value {
+      font-size: 40px;
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -1px;
+      color: var(--neutral-black);
+    }
+
+    .tile-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .tile {
+      border-radius: 12px;
+      padding: 12px 16px;
+      color: var(--neutral-black);
+    }
+
+    .tile-value {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      line-height: 1.2;
+    }
+
+    .tile.tile-pink { background: color-mix(in srgb, var(--pink-600), white 25%); }
+    .tile.tile-available { background: color-mix(in srgb, var(--lblue-600), white 25%); }
+    .tile.tile-active { background: color-mix(in srgb, var(--blue-600), white 20%); color: var(--neutral-white); }
+    .tile.tile-active .stat-label { color: var(--neutral-white); opacity: 0.85; }
+
+    .tile.status-ok { background: color-mix(in srgb, var(--turquoise-600), white 25%); }
+    .tile.status-warning { background: color-mix(in srgb, var(--yellow-600), white 15%); }
+    .tile.status-critical { background: color-mix(in srgb, var(--red-600), white 15%); }
+
+    .roster-section {
+      border-top: 1px solid var(--neutral-grey);
+      padding-top: 8px;
+      margin-bottom: 16px;
+    }
+
+    .agent-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 2px;
+      border-bottom: 1px solid var(--neutral-grey);
+      font-size: 13px;
+    }
+
+    .agent-row:last-child {
+      border-bottom: none;
+    }
+
+    .agent-name {
+      font-weight: 600;
+      color: var(--neutral-black);
+    }
+
+    .status-pill {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
       white-space: nowrap;
     }
 
-    .queue-badge.ok {
-      background: rgba(16, 185, 129, 0.15);
-      color: var(--status-ok);
+    .status-pill.available {
+      background: var(--yellow-600);
+      color: var(--neutral-black);
     }
 
-    .queue-badge.warning {
-      background: rgba(245, 158, 11, 0.15);
-      color: var(--status-warning);
+    .status-pill.oncall {
+      background: var(--pink-600);
+      color: var(--neutral-black);
     }
 
-    .queue-badge.critical {
-      background: rgba(239, 68, 68, 0.15);
-      color: var(--status-critical);
+    .status-pill.wrapup {
+      background: var(--neutral-white);
+      border: 1.5px solid var(--neutral-black);
+      color: var(--neutral-black);
     }
 
-    .queue-metrics {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
-      position: relative;
-      z-index: 1;
+    .status-pill.unknown {
+      background: var(--neutral-grey-light);
+      color: var(--neutral-text-muted);
+      border: 1px solid var(--neutral-grey);
     }
 
-    .metric {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
+    .roster-empty,
+    .roster-unavailable {
+      padding: 10px 2px;
+      font-size: 12px;
+      color: var(--neutral-text-muted);
+      font-style: italic;
+      text-align: center;
     }
 
-    .metric-label {
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .metric-value {
-      font-family: 'Consolas', 'Monaco', monospace;
-      font-size: 20px;
+    .manage-btn {
+      width: 100%;
+      padding: 14px;
+      background: var(--neutral-black);
+      color: var(--neutral-white);
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
       font-weight: 700;
-      color: var(--text-primary);
-      line-height: 1;
-      letter-spacing: -0.5px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.15s ease;
     }
 
-    .metric-value.large-number {
-      font-size: 24px;
-    }
-
-    .metric-icon {
-      margin-right: 4px;
-      font-size: 14px;
+    .manage-btn:hover {
+      background: #262626;
     }
 
     .loading-container,
@@ -369,15 +324,16 @@ export class QueueStatisticsModern extends LitElement {
       justify-content: center;
       padding: 40px 20px;
       text-align: center;
-      position: relative;
-      z-index: 1;
+      background: var(--neutral-white);
+      border: 2px solid var(--neutral-black);
+      border-radius: 16px;
     }
 
     .loading-spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid var(--border-color);
-      border-top-color: var(--accent-blue);
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--neutral-grey);
+      border-top-color: var(--blue-600);
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
       margin-bottom: 16px;
@@ -391,26 +347,20 @@ export class QueueStatisticsModern extends LitElement {
     .error-text,
     .empty-text {
       font-size: 13px;
-      color: var(--text-secondary);
+      color: var(--neutral-text-muted);
       margin-top: 8px;
     }
 
-    .error-icon {
+    .error-icon,
+    .empty-icon {
       font-size: 32px;
       margin-bottom: 12px;
     }
 
-    .empty-icon {
-      font-size: 48px;
-      opacity: 0.3;
-      margin-bottom: 12px;
-    }
-
     /* Responsive design */
-    @media (max-width: 768px) {
-      .queue-metrics {
+    @media (max-width: 480px) {
+      .tile-grid {
         grid-template-columns: 1fr;
-        gap: 8px;
       }
     }
 
@@ -479,7 +429,7 @@ export class QueueStatisticsModern extends LitElement {
   /**
    * Fetch all queues the agent is assigned to from three sources:
    * 1. Team-based queues
-   * 2. Skill-based queues  
+   * 2. Skill-based queues
    * 3. Agent-assigned queues
    */
   private async getQueues() {
@@ -510,12 +460,12 @@ export class QueueStatisticsModern extends LitElement {
           requestOptions
         );
         const result = await response.json();
-        
+
         // Add queue IDs to filter
         if (result.data && Array.isArray(result.data)) {
           result.data.forEach((q: any) => {
-            this.queueFilter.push({ 
-              lastQueue: { id: { equals: q.id } } 
+            this.queueFilter.push({
+              lastQueue: { id: { equals: q.id } }
             });
           });
         }
@@ -552,6 +502,7 @@ export class QueueStatisticsModern extends LitElement {
           task(from: $from, to: $to, filter: $filter) {
             tasks {
               lastQueue {
+                id
                 name
               }
               aggregation {
@@ -591,18 +542,122 @@ export class QueueStatisticsModern extends LitElement {
         'https://api.wxcc-us1.cisco.com/search',
         requestOptions
       );
-      
+
       const result = await response.json();
-      
+
       if (result.data?.task?.tasks) {
         this.queueData = result.data.task.tasks;
         this.updateTemplate();
         this.isLoading = false;
         this.hasError = false;
+
+        // Best-effort agent roster refresh - failures are handled internally
+        // and never block or fail the queue stats render.
+        this.getAgentRoster();
       }
     } catch (error) {
       this.handleError(error);
     }
+  }
+
+  /**
+   * Best-effort fetch of the per-queue agent roster (name + live state).
+   *
+   * NOTE: Webex CC's agent-listing API (used for consult/transfer "buddy
+   * agent" lookups) is documented as asynchronous - it can return a 202
+   * and deliver the actual payload over a separate WebSocket notification
+   * subscription. That handshake isn't implemented here because the exact
+   * event/payload shape couldn't be confirmed against live docs. This method
+   * only handles a direct synchronous JSON response. If your org's endpoint
+   * only replies via the async/WebSocket path, this will consistently mark
+   * the roster "unavailable" below - that's expected until this method is
+   * updated against a verified response shape.
+   *
+   * Whatever happens, we never invent agent names or states: a queue with
+   * no usable data renders an explicit "unavailable" state instead.
+   */
+  private async getAgentRoster() {
+    if (this.demoMode || !this.queueStats.length) {
+      return;
+    }
+
+    const headers = {
+      'Authorization': `Bearer ${this.token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
+
+    const results = await Promise.all(this.queueStats.map(async (queue) => {
+      if (!queue.id) {
+        return { queueId: queue.id, roster: null as AgentRosterEntry[] | null };
+      }
+      try {
+        const response = await fetch(
+          `https://api.wxcc-us1.cisco.com/organization/${this.orgId}/v1/agents/buddy-agents-list`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ queueId: queue.id }),
+            redirect: 'follow',
+            signal: AbortSignal.timeout(5000)
+          }
+        );
+
+        // Async APIs (202 Accepted) require a WebSocket notification
+        // subscription this widget doesn't implement yet - see note above.
+        if (response.status === 202) {
+          console.info(`Agent roster for "${queue.name}" is delivered asynchronously; live status unavailable.`);
+          return { queueId: queue.id, roster: null as AgentRosterEntry[] | null };
+        }
+
+        if (!response.ok) {
+          return { queueId: queue.id, roster: null as AgentRosterEntry[] | null };
+        }
+
+        const result = await response.json();
+        const roster = this.parseAgentRoster(result);
+        return { queueId: queue.id, roster };
+      } catch (error) {
+        console.error(`Error fetching agent roster for queue ${queue.id}:`, error);
+        return { queueId: queue.id, roster: null as AgentRosterEntry[] | null };
+      }
+    }));
+
+    const nextRoster = new Map(this.agentRoster);
+    for (const { queueId, roster } of results) {
+      nextRoster.set(queueId, roster);
+    }
+    this.agentRoster = nextRoster;
+  }
+
+  /**
+   * Normalizes a roster API response into AgentRosterEntry[], tolerating
+   * several plausible field-name variants since the exact schema is
+   * unverified (see getAgentRoster). Returns null if nothing usable is found.
+   */
+  private parseAgentRoster(result: any): AgentRosterEntry[] | null {
+    const rawList: any[] = result?.data ?? result?.agents ?? result?.agentList ?? (Array.isArray(result) ? result : null);
+    if (!Array.isArray(rawList)) {
+      return null;
+    }
+
+    return rawList.map((agent: any): AgentRosterEntry => {
+      const rawState = agent.state ?? agent.agentState ?? agent.status ?? '';
+      return {
+        id: agent.id ?? agent.agentId ?? '',
+        name: agent.name ?? agent.agentName ?? agent.displayName ?? 'Unknown Agent',
+        state: this.normalizeAgentState(rawState),
+        stateDurationSeconds: agent.stateDuration ?? agent.stateDurationSeconds ?? undefined
+      };
+    });
+  }
+
+  private normalizeAgentState(rawState: string): AgentRosterEntry['state'] {
+    const s = (rawState || '').toLowerCase();
+    if (s.includes('available')) return 'available';
+    if (s.includes('wrap')) return 'wrapup';
+    if (s.includes('call') || s.includes('engaged') || s.includes('connect') || s.includes('talk')) return 'oncall';
+    return 'unknown';
   }
 
   /**
@@ -618,8 +673,9 @@ export class QueueStatisticsModern extends LitElement {
       const contacts = item.aggregation?.find((a: any) => a.name === 'contacts')?.value || 0;
       const oldestStart = item.aggregation?.find((a: any) => a.name === 'oldestStart')?.value || 0;
       const waitTimeSeconds = oldestStart ? Math.floor((Date.now() - oldestStart) / 1000) : 0;
-      
+
       return {
+        id: item.lastQueue?.id || '',
         name: item.lastQueue?.name || 'Unknown Queue',
         contacts,
         waitTimeSeconds,
@@ -650,27 +706,37 @@ export class QueueStatisticsModern extends LitElement {
   }
 
   /**
-   * Format seconds to HH:MM:SS
+   * Format seconds to MM:SS
    */
   private formatWaitTime(seconds: number): string {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
+    const minutes = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    
-    return [hours, minutes, secs]
-      .map(v => v.toString().padStart(2, '0'))
-      .join(':');
+    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
-  /**
-   * Get status badge label
-   */
-  private getStatusLabel(status: string): string {
+  private getStatusText(status: string): string {
     switch (status) {
-      case 'critical': return '🔴 Critical';
-      case 'warning': return '⚠️ Warning';
-      default: return '✓ Normal';
+      case 'critical': return 'Critical';
+      case 'warning': return 'Warning';
+      default: return 'OK';
     }
+  }
+
+  private getStatusPillLabel(state: AgentRosterEntry['state']): string {
+    switch (state) {
+      case 'available': return 'Ready';
+      case 'oncall': return 'In Call';
+      case 'wrapup': return 'Wrap Up';
+      default: return 'Unknown';
+    }
+  }
+
+  private handleManageQueue(queue: QueueStat) {
+    this.dispatchEvent(new CustomEvent('manage-queue', {
+      detail: { queueId: queue.id, queueName: queue.name },
+      bubbles: true,
+      composed: true
+    }));
   }
 
   /**
@@ -686,22 +752,7 @@ export class QueueStatisticsModern extends LitElement {
   // === RENDER ===
 
   render() {
-    return html`
-      <div class="container">
-        <div class="header">
-          <div class="title">
-            <div class="title-icon">📊</div>
-            Queue Monitor
-          </div>
-          <div class="status-indicator">
-            <div class="status-dot"></div>
-            Live
-          </div>
-        </div>
-
-        ${this.renderContent()}
-      </div>
-    `;
+    return html`${this.renderContent()}`;
   }
 
   private renderContent() {
@@ -734,41 +785,81 @@ export class QueueStatisticsModern extends LitElement {
 
     return html`
       <div class="queues-container">
-        ${this.queueStats.map((queue, index) => html`
-          <div 
-            class="queue-card status-${queue.status}"
-            style="animation-delay: ${index * 0.05}s"
-          >
-            <div class="queue-header">
-              <div class="queue-name">${queue.name}</div>
-              <div class="queue-badge ${queue.status}">
-                ${this.getStatusLabel(queue.status)}
-              </div>
-            </div>
-            
-            <div class="queue-metrics">
-              <div class="metric">
-                <div class="metric-label">
-                  <span class="metric-icon">👥</span>Contacts
-                </div>
-                <div class="metric-value ${queue.contacts >= 10 ? 'large-number' : ''}">
-                  ${queue.contacts}
-                </div>
-              </div>
-              
-              <div class="metric">
-                <div class="metric-label">
-                  <span class="metric-icon">⏱️</span>Longest Wait
-                </div>
-                <div class="metric-value">
-                  ${this.formatWaitTime(queue.waitTimeSeconds)}
-                </div>
-              </div>
-            </div>
-          </div>
-        `)}
+        ${this.queueStats.map((queue, index) => this.renderQueueCard(queue, index))}
       </div>
     `;
+  }
+
+  private renderQueueCard(queue: QueueStat, index: number) {
+    const roster = this.agentRoster.get(queue.id);
+    const available = roster ? roster.filter(a => a.state === 'available').length : null;
+    const activeCalls = roster ? roster.filter(a => a.state === 'oncall').length : null;
+
+    return html`
+      <div class="queue-card" style="animation-delay: ${index * 0.05}s">
+        <div class="card-header">
+          <div class="queue-title">
+            <span class="live-dot"></span>
+            Queue: ${queue.name}
+          </div>
+          <span class="live-badge">Live</span>
+        </div>
+
+        <div class="card-body">
+          <div class="waiting-now-box">
+            <div class="stat-label">Waiting Now</div>
+            <div class="waiting-now-value">${queue.contacts}</div>
+          </div>
+
+          <div class="tile-grid">
+            <div class="tile tile-pink">
+              <div class="stat-label">Longest Wait</div>
+              <div class="tile-value">${this.formatWaitTime(queue.waitTimeSeconds)}</div>
+            </div>
+            <div class="tile status-${queue.status}">
+              <div class="stat-label">Status</div>
+              <div class="tile-value">${this.getStatusText(queue.status)}</div>
+            </div>
+            <div class="tile tile-available">
+              <div class="stat-label">Available</div>
+              <div class="tile-value">${available === null ? '—' : available}</div>
+            </div>
+            <div class="tile tile-active">
+              <div class="stat-label">Active Calls</div>
+              <div class="tile-value">${activeCalls === null ? '—' : activeCalls}</div>
+            </div>
+          </div>
+
+          <div class="roster-section">
+            ${this.renderRoster(roster)}
+          </div>
+
+          <button class="manage-btn" @click=${() => this.handleManageQueue(queue)}>
+            Manage Queue
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderRoster(roster: AgentRosterEntry[] | null | undefined) {
+    if (roster === null) {
+      return html`<div class="roster-unavailable">Agent status unavailable</div>`;
+    }
+    if (!roster || roster.length === 0) {
+      return html`<div class="roster-empty">No agents currently assigned</div>`;
+    }
+
+    return roster.map(agent => html`
+      <div class="agent-row">
+        <span class="agent-name">${agent.name}</span>
+        <span class="status-pill ${agent.state}">
+          ${this.getStatusPillLabel(agent.state)}${agent.state === 'oncall' && agent.stateDurationSeconds != null
+            ? ` (${this.formatWaitTime(agent.stateDurationSeconds)})`
+            : ''}
+        </span>
+      </div>
+    `);
   }
 }
 

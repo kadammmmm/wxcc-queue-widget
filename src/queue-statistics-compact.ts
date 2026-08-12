@@ -916,10 +916,6 @@ export class QueueStatisticsCompact extends LitElement {
 
   private formatOrigin(origin: string): string {
     if (!origin || origin === 'Unknown') return 'Unknown Caller';
-    // Mask phone number for privacy: +1234567890 -> +1***890
-    if (origin.match(/^\+?\d{10,}/)) {
-      return origin.slice(0, 3) + '***' + origin.slice(-3);
-    }
     return origin;
   }
 

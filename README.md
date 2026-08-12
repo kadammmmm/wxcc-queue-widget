@@ -1,17 +1,19 @@
 # Webex Contact Center Queue Statistics Widget
 
-A real-time queue monitoring widget for Webex Contact Center Agent Desktop. Displays live queue statistics in a compact header bar with expandable detail panels.
+A real-time queue monitoring widget for Webex Contact Center Agent Desktop. Displays one card per queue with live stats and an agent roster, sorted by urgency.
 
 ![Widget Preview](docs/widget-preview.png)
 
 ## Features
 
-- 📊 **Real-time queue statistics** - Contacts waiting and longest wait time per queue
-- 🚦 **Color-coded status** - Green (OK), Yellow (Warning), Red (Critical) based on configurable thresholds
-- 📱 **Compact design** - Fits in the 64px Agent Desktop header
-- 🔍 **Click-to-expand panels** - Detailed view of individual contacts in each queue
+- 📊 **Real-time queue statistics** - Contacts waiting, longest wait time, and status per queue
+- 🧑‍💻 **Agent roster** - Per-queue agent names and live status (Ready / In Call / Wrap Up), best-effort; shows an explicit "unavailable" state rather than guessing when the data can't be fetched
+- 🚦 **Color-coded status** - OK / Warning / Critical tiles based on configurable thresholds
 - 🔄 **Auto-refresh** - Configurable refresh interval (default: 30 seconds)
-- 📜 **Horizontal scrolling** - Supports multiple queues with priority sorting
+- 📜 **Multi-queue support** - Stacked, scrollable cards sorted by priority (critical first)
+- 🔓 **No masked data** - Names and numbers are shown as returned by the API; nothing is anonymized
+
+> A compact 64px header-bar variant (`queue-statistics-compact.ts`, with click-to-expand contact detail panels) is also included in `src/` for teams that want that form factor, but it is not the default build - see [Alternative: Compact Widget](#alternative-compact-widget).
 
 ---
 
@@ -186,7 +188,7 @@ Add this to the `header` section of your layout:
   },
   "children": [
     {
-      "comp": "queue-statistics-compact",
+      "comp": "queue-statistics-modern",
       "script": "https://YOUR_USERNAME.github.io/wxcc-queue-widget/index.js",
       "attributes": {
         "contacts-warning": "5",
@@ -200,13 +202,13 @@ Add this to the `header` section of your layout:
 }
 ```
 
-### 3. Alternative: Header Widget (Always Visible)
+### 3. Alternative: Panel Widget (Always Visible)
 
-To display the widget directly in the header (always visible, no tab):
+To display the widget directly in a panel (always visible, no tab):
 
 ```json
 {
-  "comp": "queue-statistics-compact",
+  "comp": "queue-statistics-modern",
   "script": "https://YOUR_USERNAME.github.io/wxcc-queue-widget/index.js",
   "attributes": {
     "contacts-warning": "5",
@@ -216,6 +218,8 @@ To display the widget directly in the header (always visible, no tab):
   }
 }
 ```
+
+Listen for the `manage-queue` custom event (bubbles, composed) to wire up your own "Manage Queue" action - it fires with `event.detail.queueId` and `event.detail.queueName`.
 
 ### 4. Save and Publish
 
@@ -243,7 +247,7 @@ Configure the widget behavior using HTML attributes:
 
 ```json
 {
-  "comp": "queue-statistics-compact",
+  "comp": "queue-statistics-modern",
   "script": "https://YOUR_USERNAME.github.io/wxcc-queue-widget/index.js",
   "attributes": {
     "contacts-warning": "3",
@@ -258,7 +262,7 @@ Configure the widget behavior using HTML attributes:
 
 ```json
 {
-  "comp": "queue-statistics-compact",
+  "comp": "queue-statistics-modern",
   "script": "https://YOUR_USERNAME.github.io/wxcc-queue-widget/index.js",
   "attributes": {
     "data-refresh-interval": "15000"
@@ -342,6 +346,10 @@ If you see errors like `Unknown type 'TaskAggregation'`:
 2. Verify there are no console errors during refresh
 3. Ensure the agent session hasn't expired
 
+### Agent Roster Shows "Agent status unavailable"
+
+The per-agent roster call is best-effort. Webex CC's agent-listing API is documented as asynchronous (it can respond `202 Accepted` and deliver the real payload over a separate WebSocket notification subscription), and that handshake isn't implemented yet - see the comment above `getAgentRoster()` in `src/queue-statistics-modern.ts`. If your token/scope only supports the async path, the roster will consistently show "unavailable" until that method is updated against a confirmed response shape for your org. This is intentional: the widget never fabricates agent names or statuses.
+
 ---
 
 ## Development
@@ -351,7 +359,8 @@ If you see errors like `Unknown type 'TaskAggregation'`:
 ```
 wxcc-queue-widget/
 ├── src/
-│   └── queue-statistics-compact.ts   # Main widget source
+│   ├── queue-statistics-modern.ts    # Main widget source (default build)
+│   └── queue-statistics-compact.ts   # Alternative 64px header-bar widget
 ├── dist/
 │   └── index.js                      # Compiled widget (built)
 ├── package.json
@@ -359,6 +368,10 @@ wxcc-queue-widget/
 ├── vite.config.ts
 └── README.md
 ```
+
+### Alternative: Compact Widget
+
+`queue-statistics-compact.ts` is still in the repo for teams that want a 64px header bar with click-to-expand contact panels instead of the full queue cards. It isn't built by default. To build it, change `entry` (and the matching `name` values) in `vite.config.ts` back to `./src/queue-statistics-compact.ts`, then use `"comp": "queue-statistics-compact"` in your Desktop Layout JSON.
 
 ### Development Commands
 
@@ -375,7 +388,7 @@ npm run typecheck
 
 ### Making Changes
 
-1. Edit `src/queue-statistics-compact.ts`
+1. Edit `src/queue-statistics-modern.ts`
 2. Run `npm run build`
 3. Test locally or deploy to GitHub Pages
 4. Commit and push changes
@@ -463,7 +476,7 @@ Content-Type: application/json
 | EU | `api.wxcc-eu1.cisco.com` |
 | ANZ | `api.wxcc-anz1.cisco.com` |
 
-To change regions, modify the fetch URL in `queue-statistics-compact.ts`.
+To change regions, modify the fetch URL in `queue-statistics-modern.ts`.
 
 ---
 
