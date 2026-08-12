@@ -61,7 +61,8 @@ export class QueueStatisticsModern extends LitElement {
   //   []        -> fetch succeeded, no agents currently assigned
   //   [...]     -> live roster
   @state() agentRoster: Map<string, AgentRosterEntry[] | null> = new Map(); // Public for demo mode
-  @state() private expandedQueueIds: Set<string> = new Set();
+  @state() isPanelOpen: boolean = false; // Public for demo mode
+  @state() panelPosition: { top: number; left: number } = { top: 0, left: 0 }; // Public for demo mode
   @state() private _dataRefreshTimer?: any;
   @state() private _uiRefreshTimer?: any;
   @state() isLoading: boolean = true;  // Public for demo mode
@@ -75,10 +76,12 @@ export class QueueStatisticsModern extends LitElement {
     }
 
     :host {
-      display: block;
-      width: 100%;
+      /* Sized to the compact indicator's content, not stretched - this
+         sits inline alongside several other icon-sized widgets in the
+         Desktop header. The overlay panel below uses fixed positioning,
+         so it isn't constrained by the host's size. */
+      display: inline-block;
       max-width: 100%;
-      overflow-x: hidden;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
       /* Palette - literal color values only */
@@ -101,6 +104,111 @@ export class QueueStatisticsModern extends LitElement {
       --red-600: #ff5c5f;
       --yellow-600: #ffbc2a;
       --turquoise-600: #00dadf;
+    }
+
+    /* === COMPACT HEADER INDICATOR === */
+    .compact-bar {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      max-width: 220px;
+      height: 28px;
+      padding: 0 12px;
+      background: var(--neutral-black);
+      border: none;
+      border-radius: 999px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .compact-bar:hover {
+      background: #262626;
+    }
+
+    .compact-status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .compact-status-dot.status-ok { background: var(--turquoise-600); }
+    .compact-status-dot.status-warning { background: var(--yellow-600); }
+    .compact-status-dot.status-critical { background: var(--red-600); }
+
+    .compact-text {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--neutral-white);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    /* === EXPANDED OVERLAY PANEL === */
+    .overlay-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: transparent;
+    }
+
+    .overlay-panel {
+      position: fixed;
+      width: 360px;
+      max-width: calc(100vw - 16px);
+      max-height: 70vh;
+      display: flex;
+      flex-direction: column;
+      background: var(--neutral-white);
+      border: 2px solid var(--neutral-black);
+      border-radius: 16px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+      z-index: 10000;
+      overflow: hidden;
+      animation: slideIn 0.15s ease-out;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--neutral-black);
+      flex-shrink: 0;
+    }
+
+    .panel-title {
+      color: var(--neutral-white);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .close-btn {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.12);
+      border: none;
+      border-radius: 6px;
+      color: var(--neutral-white);
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .close-btn:hover {
+      background: rgba(255, 255, 255, 0.22);
+    }
+
+    .panel-content {
+      padding: 12px;
+      overflow-y: auto;
     }
 
     .queues-container {
@@ -148,8 +256,6 @@ export class QueueStatisticsModern extends LitElement {
       justify-content: space-between;
       align-items: center;
       gap: 8px;
-      cursor: pointer;
-      user-select: none;
     }
 
     .queue-title {
@@ -180,28 +286,12 @@ export class QueueStatisticsModern extends LitElement {
       50% { opacity: 0.4; }
     }
 
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-shrink: 0;
-    }
-
     .live-badge {
+      flex-shrink: 0;
       font-size: 10px;
       font-weight: 700;
       letter-spacing: 0.5px;
       color: var(--turquoise-600);
-    }
-
-    .expand-chevron {
-      font-size: 10px;
-      transition: transform 0.2s ease;
-      display: inline-block;
-    }
-
-    .expand-chevron.open {
-      transform: rotate(180deg);
     }
 
     .card-summary {
@@ -209,8 +299,6 @@ export class QueueStatisticsModern extends LitElement {
       align-items: center;
       gap: 8px;
       padding: 10px 16px;
-      cursor: pointer;
-      user-select: none;
     }
 
     .summary-status-dot {
@@ -363,11 +451,8 @@ export class QueueStatisticsModern extends LitElement {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 40px 20px;
+      padding: 32px 20px;
       text-align: center;
-      background: var(--neutral-white);
-      border: 2px solid var(--neutral-black);
-      border-radius: 16px;
     }
 
     .loading-spinner {
@@ -420,12 +505,20 @@ export class QueueStatisticsModern extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.initialize();
+    document.addEventListener('click', this.handleOutsideClick);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     this.cleanup();
+    document.removeEventListener('click', this.handleOutsideClick);
   }
+
+  private handleOutsideClick = (e: MouseEvent) => {
+    if (this.isPanelOpen && !this.shadowRoot?.contains(e.target as Node)) {
+      this.isPanelOpen = false;
+    }
+  };
 
   // === INITIALIZATION ===
 
@@ -702,14 +795,23 @@ export class QueueStatisticsModern extends LitElement {
     }
   }
 
-  private toggleQueueExpanded(queueId: string) {
-    const next = new Set(this.expandedQueueIds);
-    if (next.has(queueId)) {
-      next.delete(queueId);
-    } else {
-      next.add(queueId);
+  private togglePanel(e: Event) {
+    if (this.isPanelOpen) {
+      this.isPanelOpen = false;
+      return;
     }
-    this.expandedQueueIds = next;
+
+    const target = e.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    this.panelPosition = {
+      top: rect.bottom + 6,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 380))
+    };
+    this.isPanelOpen = true;
+  }
+
+  private closePanel() {
+    this.isPanelOpen = false;
   }
 
   /**
@@ -725,7 +827,55 @@ export class QueueStatisticsModern extends LitElement {
   // === RENDER ===
 
   render() {
-    return html`${this.renderContent()}`;
+    return html`
+      ${this.renderCompactBar()}
+      ${this.isPanelOpen ? html`
+        <div class="overlay-backdrop" @click=${() => this.closePanel()}></div>
+        <div
+          class="overlay-panel"
+          style="top: ${this.panelPosition.top}px; left: ${this.panelPosition.left}px;"
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="panel-header">
+            <span class="panel-title">Queue Statistics</span>
+            <button class="close-btn" @click=${() => this.closePanel()}>✕</button>
+          </div>
+          <div class="panel-content">
+            ${this.renderContent()}
+          </div>
+        </div>
+      ` : ''}
+    `;
+  }
+
+  private renderCompactBar() {
+    const totalContacts = this.queueStats.reduce((sum, q) => sum + q.contacts, 0);
+    const busyQueues = this.queueStats.filter(q => q.contacts > 0);
+
+    const statusPriority: Record<string, number> = { critical: 3, warning: 2, ok: 1 };
+    const worstStatus = this.queueStats.reduce<'ok' | 'warning' | 'critical'>((worst, q) => {
+      return statusPriority[q.status] > statusPriority[worst] ? q.status : worst;
+    }, 'ok');
+
+    let summary: string;
+    if (this.isLoading) {
+      summary = 'Loading…';
+    } else if (this.hasError) {
+      summary = 'Queue data unavailable';
+    } else if (totalContacts === 0) {
+      summary = 'No calls in queue';
+    } else if (busyQueues.length === 1) {
+      summary = `${busyQueues[0].name}: ${busyQueues[0].contacts} waiting`;
+    } else {
+      summary = `${totalContacts} waiting across ${busyQueues.length} queues`;
+    }
+
+    return html`
+      <button class="compact-bar" @click=${(e: Event) => this.togglePanel(e)}>
+        <span class="compact-status-dot status-${this.hasError ? 'critical' : worstStatus}"></span>
+        <span class="compact-text">${summary}</span>
+      </button>
+    `;
   }
 
   private renderContent() {
@@ -767,23 +917,22 @@ export class QueueStatisticsModern extends LitElement {
     const roster = this.agentRoster.get(queue.id);
     const available = roster ? roster.filter(a => a.state === 'available').length : null;
     const activeCalls = roster ? roster.filter(a => a.state === 'oncall').length : null;
-    const expanded = this.expandedQueueIds.has(queue.id);
     const isEmpty = queue.contacts === 0;
+    // Queues with calls show full detail directly; empty ones stay a
+    // one-line summary so a long queue list stays scannable.
+    const expanded = !isEmpty;
 
     return html`
       <div class="queue-card" style="animation-delay: ${index * 0.05}s">
-        <div class="card-header" @click=${() => this.toggleQueueExpanded(queue.id)}>
+        <div class="card-header">
           <div class="queue-title">
             <span class="live-dot"></span>
             Queue: ${queue.name}
           </div>
-          <div class="header-right">
-            <span class="live-badge">Live</span>
-            <span class="expand-chevron ${expanded ? 'open' : ''}">▾</span>
-          </div>
+          <span class="live-badge">Live</span>
         </div>
 
-        <div class="card-summary" @click=${() => this.toggleQueueExpanded(queue.id)}>
+        <div class="card-summary">
           <span class="summary-status-dot status-${queue.status}"></span>
           <span class="summary-text ${isEmpty ? 'is-empty' : ''}">
             ${isEmpty

@@ -9,22 +9,46 @@
       body {
         margin: 0;
         min-height: 100vh;
-        display: flex;
-        justify-content: center;
-        padding: 32px 16px;
-        background: #f7f7f7;
+        background: #eef0f4;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        box-sizing: border-box;
       }
-      main {
-        width: 100%;
-        max-width: 420px;
-        min-width: 0;
+      /* Mimics a crowded Agent Desktop header bar - the widget has to
+         share this row with several other icon-sized widgets. */
+      .fake-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 44px;
+        padding: 0 12px;
+        background: #1f2430;
+      }
+      .fake-icon {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.15);
+        flex-shrink: 0;
+      }
+      #widget-root {
+        position: relative;
+      }
+      .fake-body {
+        padding: 24px;
+        color: #888;
+        font-size: 13px;
       }
     </style>
     <script type="module" src="/src/demo.ts"></script>
   </head>
   <body>
-    <main id="widget-root"></main>
+    <div class="fake-header">
+      <div class="fake-icon"></div>
+      <div class="fake-icon"></div>
+      <div id="widget-root"></div>
+      <div class="fake-icon"></div>
+      <div class="fake-icon"></div>
+      <div class="fake-icon"></div>
+    </div>
+    <div class="fake-body">Rest of Agent Desktop (for scale reference only)</div>
   </body>
 </html>

@@ -16,16 +16,20 @@ document.getElementById('widget-root')!.appendChild(el);
 // clobbered.
 el.isLoading = false;
 
-// Four queues covering ok / warning / critical status plus an empty one.
-// Shape mirrors our best guess at GET /v1/queues/statistics's response (see
-// the comment on fetchQueueStatistics() in queue-statistics-modern.ts) -
-// adjust this once the real response shape is confirmed.
+// Several queues covering ok / warning / critical status plus a batch of
+// empty ones (mirrors a real org with many mostly-idle queues). Shape
+// mirrors our best guess at GET /v1/queues/statistics's response (see the
+// comment on fetchQueueStatistics() in queue-statistics-modern.ts) - adjust
+// this once the real response shape is confirmed.
 el.queueData = {
   data: [
     { id: 'q1', name: 'Support EN', activeContacts: 14, longestWaitTime: 8 * 60 + 22 },
     { id: 'q2', name: 'Billing', activeContacts: 2, longestWaitTime: 30 },
     { id: 'q3', name: 'VIP Escalations', activeContacts: 7, longestWaitTime: 130 },
-    { id: 'q4', name: 'After Hours', activeContacts: 0, longestWaitTime: 0 }
+    { id: 'q4', name: 'After Hours', activeContacts: 0, longestWaitTime: 0 },
+    { id: 'q5', name: 'TS_EMAIL', activeContacts: 0, longestWaitTime: 0 },
+    { id: 'q6', name: 'TS_CHAT_Q', activeContacts: 0, longestWaitTime: 0 },
+    { id: 'q7', name: 'MATT_VOICE', activeContacts: 0, longestWaitTime: 0 }
   ]
 };
 el.updateTemplate();
@@ -41,3 +45,8 @@ roster.set('q1', [
 roster.set('q2', []);
 roster.set('q3', null);
 el.agentRoster = roster;
+
+// Open the panel by default so the demo page shows the expanded view,
+// since there's no way to script a click in a static screenshot check.
+el.panelPosition = { top: 44, left: 12 };
+el.isPanelOpen = true;

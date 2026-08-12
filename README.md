@@ -1,17 +1,17 @@
 # Webex Contact Center Queue Statistics Widget
 
-A real-time queue monitoring widget for Webex Contact Center Agent Desktop. Displays one compact row per queue - tap a queue to expand it for full stats and the agent roster - sorted by urgency.
+A real-time queue monitoring widget for Webex Contact Center Agent Desktop, built to live in the header alongside several other widgets. Renders as a single small pill (e.g. "23 waiting across 3 queues") that expands into a floating panel with full per-queue detail on click.
 
 ![Widget Preview](docs/widget-preview.png)
 
 ## Features
 
+- 🔘 **One compact header indicator** - A single pill, not one element per queue, since the header is shared with many other widgets; shows "No calls in queue" or a short summary of what's waiting
+- 🖱️ **Click to expand** - Opens a floating panel with every queue's detail; queues with calls show full stats + agent roster automatically, empty queues stay a one-line row so a long queue list stays scannable
 - 📊 **Real-time queue statistics** - Contacts waiting, longest wait time, and status per queue
-- 📉 **Collapsed by default** - Each queue is a single compact row ("No calls waiting" or "N waiting"); click a queue to expand it for the full detail (stat tiles + agent roster), so a narrow panel with many queues stays scannable
 - 🧑‍💻 **Agent roster** - Per-queue agent names and live status (Ready / In Call / Wrap Up), best-effort; shows an explicit "unavailable" state rather than guessing when the data can't be fetched
 - 🚦 **Color-coded status** - OK / Warning / Critical based on configurable thresholds
 - 🔄 **Auto-refresh** - Configurable refresh interval (default: 30 seconds)
-- 📜 **Multi-queue support** - Stacked, scrollable cards sorted by priority (critical first)
 - 🔓 **No masked data** - Names and numbers are shown as returned by the API; nothing is anonymized
 
 > A compact 64px header-bar variant (`queue-statistics-compact.ts`, with click-to-expand contact detail panels) is also included in `src/` for teams that want that form factor, but it is not the default build - see [Alternative: Compact Widget](#alternative-compact-widget).
@@ -161,66 +161,29 @@ git checkout main
 
 ### 2. Add the Widget to the Header
 
-Add this to the `header` section of your layout:
+This widget is designed to sit directly in the `advancedHeader` area alongside your other header widgets (it renders as a small pill, not a full panel, so it doesn't need a tab):
 
 ```json
 {
-  "comp": "md-tab",
-  "attributes": {
-    "slot": "tab"
-  },
-  "children": [
-    {
-      "comp": "md-icon",
-      "attributes": {
-        "name": "queue-contact_16"
+  "area": {
+    "advancedHeader": [
+      {
+        "comp": "queue-statistics-modern",
+        "script": "https://YOUR_USERNAME.github.io/wxcc-queue-widget/index.js",
+        "attributes": {
+          "contacts-warning": "5",
+          "contacts-critical": "10",
+          "wait-warning": "120",
+          "wait-critical": "300",
+          "data-refresh-interval": "30000"
+        }
       }
-    },
-    {
-      "comp": "span",
-      "textContent": "Queue Stats"
-    }
-  ]
-},
-{
-  "comp": "md-tab-panel",
-  "attributes": {
-    "slot": "panel"
-  },
-  "children": [
-    {
-      "comp": "queue-statistics-modern",
-      "script": "https://YOUR_USERNAME.github.io/wxcc-queue-widget/index.js",
-      "attributes": {
-        "contacts-warning": "5",
-        "contacts-critical": "10",
-        "wait-warning": "120",
-        "wait-critical": "300",
-        "data-refresh-interval": "30000"
-      }
-    }
-  ]
-}
-```
-
-### 3. Alternative: Panel Widget (Always Visible)
-
-To display the widget directly in a panel (always visible, no tab):
-
-```json
-{
-  "comp": "queue-statistics-modern",
-  "script": "https://YOUR_USERNAME.github.io/wxcc-queue-widget/index.js",
-  "attributes": {
-    "contacts-warning": "5",
-    "contacts-critical": "10",
-    "wait-warning": "120",
-    "wait-critical": "300"
+    ]
   }
 }
 ```
 
-### 4. Save and Publish
+### 3. Save and Publish
 
 Save your layout changes. Agents will see the widget after refreshing their desktop.
 
@@ -370,7 +333,7 @@ wxcc-queue-widget/
 
 ### Alternative: Compact Widget
 
-`queue-statistics-compact.ts` is still in the repo for teams that want a 64px header bar with click-to-expand contact panels instead of the full queue cards. It isn't built by default. To build it, change `entry` (and the matching `name` values) in `vite.config.ts` back to `./src/queue-statistics-compact.ts`, then use `"comp": "queue-statistics-compact"` in your Desktop Layout JSON.
+`queue-statistics-compact.ts` is an older 64px header-bar variant with a horizontal-scrolling per-queue strip, still in the repo but not built by default. To build it, change `entry` (and the matching `name` values) in `vite.config.ts` back to `./src/queue-statistics-compact.ts`, then use `"comp": "queue-statistics-compact"` in your Desktop Layout JSON.
 
 ### Development Commands
 
