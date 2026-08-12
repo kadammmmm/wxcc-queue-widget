@@ -21,6 +21,13 @@ interface QueueStat {
   status: 'ok' | 'warning' | 'critical';
 }
 
+interface ContactDetail {
+  id: string;
+  createdTime: number;
+  channelType: string;
+  origin: string;
+}
+
 export class QueueStatisticsModern extends LitElement {
   // === PROPERTIES (passed from Desktop Layout) ===
   @property() token?: string;
@@ -47,6 +54,9 @@ export class QueueStatisticsModern extends LitElement {
   // === STATE (internal component data) ===
   @state() private queueStats: QueueStat[] = [];
   @state() queueData?: any;  // Public for demo mode
+  // Individual parked contacts (with caller phone number/origin), keyed by
+  // queue id. Map has no entry until the fetch completes.
+  @state() contactDetails: Map<string, ContactDetail[]> = new Map(); // Public for demo mode
   @state() isPanelOpen: boolean = false; // Public for demo mode
   @state() panelPosition: { top: number; left: number } = { top: 0, left: 0 }; // Public for demo mode
   @state() private _dataRefreshTimer?: any;
@@ -358,6 +368,54 @@ export class QueueStatisticsModern extends LitElement {
     .tile.status-warning { background: color-mix(in srgb, var(--yellow-600), white 15%); }
     .tile.status-critical { background: color-mix(in srgb, var(--red-600), white 15%); }
 
+    .contacts-section {
+      border-top: 1px solid var(--neutral-grey);
+      padding-top: 4px;
+    }
+
+    .contact-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 2px;
+      border-bottom: 1px solid var(--neutral-grey);
+      font-size: 13px;
+    }
+
+    .contact-row:last-child {
+      border-bottom: none;
+    }
+
+    .contact-channel {
+      flex-shrink: 0;
+      font-size: 14px;
+    }
+
+    .contact-origin {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+      color: var(--neutral-black);
+    }
+
+    .contact-wait {
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+      color: var(--neutral-text-muted);
+      font-size: 12px;
+    }
+
+    .contacts-empty {
+      padding: 8px 2px;
+      font-size: 12px;
+      color: var(--neutral-text-muted);
+      font-style: italic;
+      text-align: center;
+    }
+
     .loading-container,
     .error-container,
     .empty-container {
@@ -558,8 +616,109 @@ export class QueueStatisticsModern extends LitElement {
       this.updateTemplate();
       this.isLoading = false;
       this.hasError = false;
+
+      // Best-effort: fetch individual caller details (phone number/origin)
+      // for display inside each expanded queue card. Failures here don't
+      // affect the main queue stats.
+      this.fetchContactDetails();
     } catch (error) {
       this.handleError(error);
+    }
+  }
+
+  /**
+   * Fetch individual parked contacts (caller origin/phone number, channel,
+   * wait start time) via the same Task Search API used above, just without
+   * the `aggregations` block - that returns one row per real task instead
+   * of a grouped count. Grouped client-side by queue id, mirroring the
+   * proven pattern in queue-statistics-compact.ts. No caller info is
+   * masked - the origin is shown exactly as the API returns it.
+   */
+  private async fetchContactDetails() {
+    if (!this.token || !this.orgId) {
+      return;
+    }
+
+    const headers = {
+      'Authorization': `Bearer ${this.token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
+
+    const to = Date.now();
+    const from = to - 86400000; // 24 hours ago
+
+    const graphqlQuery = {
+      query: `{
+        task(
+          from: ${from}
+          to: ${to}
+          filter: {
+            and: [
+              { isActive: { equals: true } }
+              { status: { equals: "parked" } }
+            ]
+          }
+        ) {
+          tasks {
+            id
+            createdTime
+            channelType
+            origin
+            lastQueue { id name }
+          }
+        }
+      }`
+    };
+
+    try {
+      const response = await fetch(
+        'https://api.wxcc-us1.cisco.com/search',
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(graphqlQuery),
+          redirect: 'follow'
+        }
+      );
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || result?.errors || result?.error) {
+        console.error(
+          'Contact details request failed:',
+          response.status,
+          result?.errors || result?.error
+        );
+        return;
+      }
+
+      const tasks: any[] = result?.data?.task?.tasks ?? [];
+      const byQueue = new Map<string, ContactDetail[]>();
+
+      for (const task of tasks) {
+        const queueId = task.lastQueue?.id;
+        if (!queueId) continue;
+
+        const list = byQueue.get(queueId) ?? [];
+        list.push({
+          id: task.id,
+          createdTime: task.createdTime,
+          channelType: task.channelType || 'telephony',
+          origin: task.origin || ''
+        });
+        byQueue.set(queueId, list);
+      }
+
+      // Oldest-waiting first, matching the "longest wait" framing used
+      // elsewhere in this widget.
+      for (const list of byQueue.values()) {
+        list.sort((a, b) => a.createdTime - b.createdTime);
+      }
+
+      this.contactDetails = byQueue;
+    } catch (error) {
+      console.error('Error fetching contact details:', error);
     }
   }
 
@@ -622,6 +781,16 @@ export class QueueStatisticsModern extends LitElement {
       case 'critical': return 'Critical';
       case 'warning': return 'Warning';
       default: return 'OK';
+    }
+  }
+
+  private getChannelIcon(channelType: string): string {
+    switch ((channelType || '').toLowerCase()) {
+      case 'telephony': return '📞';
+      case 'chat': return '💬';
+      case 'email': return '📧';
+      case 'social': return '📱';
+      default: return '📞';
     }
   }
 
@@ -780,8 +949,33 @@ export class QueueStatisticsModern extends LitElement {
                 <div class="tile-value">${this.getStatusText(queue.status)}</div>
               </div>
             </div>
+
+            <div class="contacts-section">
+              ${this.renderContacts(this.contactDetails.get(queue.id))}
+            </div>
           </div>
         ` : ''}
+      </div>
+    `;
+  }
+
+  private renderContacts(contacts: ContactDetail[] | undefined) {
+    if (contacts === undefined) {
+      return html`<div class="contacts-empty">Loading contact details…</div>`;
+    }
+    if (contacts.length === 0) {
+      return html`<div class="contacts-empty">No individual contact details available</div>`;
+    }
+
+    return html`
+      <div class="contacts-list">
+        ${contacts.map(contact => html`
+          <div class="contact-row">
+            <span class="contact-channel">${this.getChannelIcon(contact.channelType)}</span>
+            <span class="contact-origin">${contact.origin || 'Unknown Caller'}</span>
+            <span class="contact-wait">${this.formatWaitTime(Math.floor((Date.now() - contact.createdTime) / 1000))}</span>
+          </div>
+        `)}
       </div>
     `;
   }

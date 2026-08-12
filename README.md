@@ -9,6 +9,7 @@ A real-time queue monitoring widget for Webex Contact Center Agent Desktop, buil
 - 🔘 **One compact header indicator** - A single pill, not one element per queue, since the header is shared with many other widgets; shows "No calls in queue" or a short summary of what's waiting
 - 🖱️ **Click to expand** - Opens a floating panel with every queue's detail; queues with calls show full stats automatically, empty queues stay a one-line row so a long queue list stays scannable
 - 📊 **Real-time queue statistics** - Contacts waiting, longest wait time, and status per queue
+- ☎️ **Individual caller details** - Each waiting contact's phone number/email (channel-dependent) and wait time, shown as returned by the API - never masked
 - 🚦 **Color-coded status** - OK / Warning / Critical based on configurable thresholds
 - 🔄 **Auto-refresh** - Configurable refresh interval (default: 30 seconds)
 - 🔓 **No masked data** - Names and numbers are shown as returned by the API; nothing is anonymized

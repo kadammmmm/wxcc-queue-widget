@@ -50,6 +50,20 @@ el.queueData = [
 ];
 el.updateTemplate();
 
+// Individual contact details, keyed by queue id. Covers: a populated list
+// with real-looking phone numbers/emails (q1), an explicit empty result
+// (q2, to show "No individual contact details available"), and a queue
+// whose fetch simply hasn't landed yet (q3 - deliberately no entry, to
+// show the "Loading contact details..." state).
+const contacts = new Map<string, any[]>();
+contacts.set('q1', [
+  { id: 'c1', createdTime: Date.now() - (8 * 60 + 22) * 1000, channelType: 'telephony', origin: '+14155552671' },
+  { id: 'c2', createdTime: Date.now() - (4 * 60 + 5) * 1000, channelType: 'chat', origin: 'j.rivera@example.com' },
+  { id: 'c3', createdTime: Date.now() - 45 * 1000, channelType: 'telephony', origin: '+16505550132' }
+]);
+contacts.set('q2', []);
+el.contactDetails = contacts;
+
 // Open the panel by default so the demo page shows the expanded view,
 // since there's no way to script a click in a static screenshot check.
 el.panelPosition = { top: 44, left: 12 };
