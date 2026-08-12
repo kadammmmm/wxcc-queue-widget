@@ -18,20 +18,36 @@ el.isLoading = false;
 
 // Several queues covering ok / warning / critical status plus a batch of
 // empty ones (mirrors a real org with many mostly-idle queues). Shape
-// mirrors our best guess at GET /v1/queues/statistics's response (see the
-// comment on fetchQueueStatistics() in queue-statistics-modern.ts) - adjust
-// this once the real response shape is confirmed.
-el.queueData = {
-  data: [
-    { id: 'q1', name: 'Support EN', activeContacts: 14, longestWaitTime: 8 * 60 + 22 },
-    { id: 'q2', name: 'Billing', activeContacts: 2, longestWaitTime: 30 },
-    { id: 'q3', name: 'VIP Escalations', activeContacts: 7, longestWaitTime: 130 },
-    { id: 'q4', name: 'After Hours', activeContacts: 0, longestWaitTime: 0 },
-    { id: 'q5', name: 'TS_EMAIL', activeContacts: 0, longestWaitTime: 0 },
-    { id: 'q6', name: 'TS_CHAT_Q', activeContacts: 0, longestWaitTime: 0 },
-    { id: 'q7', name: 'MATT_VOICE', activeContacts: 0, longestWaitTime: 0 }
-  ]
-};
+// mirrors the GraphQL task-search response consumed by updateTemplate()
+// in queue-statistics-modern.ts (one grouped entry per queue, with a
+// "contacts" count and "oldestStart" timestamp aggregation).
+el.queueData = [
+  {
+    lastQueue: { id: 'q1', name: 'Support EN' },
+    aggregation: [
+      { name: 'contacts', value: 14 },
+      { name: 'oldestStart', value: Date.now() - (8 * 60 + 22) * 1000 }
+    ]
+  },
+  {
+    lastQueue: { id: 'q2', name: 'Billing' },
+    aggregation: [
+      { name: 'contacts', value: 2 },
+      { name: 'oldestStart', value: Date.now() - 30 * 1000 }
+    ]
+  },
+  {
+    lastQueue: { id: 'q3', name: 'VIP Escalations' },
+    aggregation: [
+      { name: 'contacts', value: 7 },
+      { name: 'oldestStart', value: Date.now() - 130 * 1000 }
+    ]
+  },
+  { lastQueue: { id: 'q4', name: 'After Hours' }, aggregation: [] },
+  { lastQueue: { id: 'q5', name: 'TS_EMAIL' }, aggregation: [] },
+  { lastQueue: { id: 'q6', name: 'TS_CHAT_Q' }, aggregation: [] },
+  { lastQueue: { id: 'q7', name: 'MATT_VOICE' }, aggregation: [] }
+];
 el.updateTemplate();
 
 // Agent roster covering: full live roster, empty roster (no agents

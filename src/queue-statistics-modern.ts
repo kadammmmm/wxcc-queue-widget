@@ -560,14 +560,21 @@ export class QueueStatisticsModern extends LitElement {
   // === API METHODS ===
 
   /**
-   * Fetch live queue statistics from the Queue Statistics API.
+   * Fetch live queue statistics via the GraphQL Task Search API.
    *
-   * Unlike most other WxCC endpoints, this one is not org-scoped in the
-   * URL - org is inferred from the token. The exact response field names
-   * are unconfirmed against official docs, so updateTemplate() parses the
-   * result defensively (tries several plausible field-name variants) and
-   * this method logs the raw response once per fetch so the real shape can
-   * be confirmed and the parsing tightened up from there.
+   * GET /v1/queues/statistics (tried previously) turned out to be a
+   * historical/interval reporting endpoint - every row is a 15-minute
+   * bucket with offered/accepted/abandoned counts, not a live "waiting
+   * now" figure - so it can't answer what this widget needs. This query
+   * instead asks for every currently active, parked (waiting) task
+   * org-wide and groups them by queue, which is genuinely live. It
+   * intentionally applies no queue-id filter (matching the proven,
+   * working pattern in queue-statistics-compact.ts) so it doesn't depend
+   * on the queue-lookup endpoints that were 404/403-ing.
+   *
+   * Note: the query uses inline `aggregations` syntax, not GraphQL
+   * variables - the API rejects (or silently ignores) aggregations passed
+   * as a variable.
    */
   private async fetchQueueStatistics() {
     if (!this.token || !this.orgId) {
@@ -579,28 +586,57 @@ export class QueueStatisticsModern extends LitElement {
 
     const headers = {
       'Authorization': `Bearer ${this.token}`,
+      'Content-Type': 'application/json',
       'Accept': 'application/json'
     };
 
     const to = Date.now();
     const from = to - 86400000; // 24 hours ago
 
+    const graphqlQuery = {
+      query: `{
+        task(
+          from: ${from}
+          to: ${to}
+          filter: {
+            and: [
+              { isActive: { equals: true } }
+              { status: { equals: "parked" } }
+            ]
+          }
+          aggregations: [
+            { field: "id", type: count, name: "contacts" }
+            { field: "createdTime", type: min, name: "oldestStart" }
+          ]
+        ) {
+          tasks {
+            lastQueue { id name }
+            aggregation { name value }
+          }
+        }
+      }`
+    };
+
     try {
       const response = await fetch(
-        `https://api.wxcc-us1.cisco.com/v1/queues/statistics?from=${from}&to=${to}`,
-        { method: 'GET', headers, redirect: 'follow' }
+        'https://api.wxcc-us1.cisco.com/search',
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(graphqlQuery),
+          redirect: 'follow'
+        }
       );
 
       const result = await response.json().catch(() => null);
 
-      if (!response.ok) {
-        throw new Error(`Queue statistics request failed (${response.status}): ${JSON.stringify(result)}`);
+      if (!response.ok || result?.errors || result?.error) {
+        throw new Error(
+          `Task search request failed (${response.status}): ${JSON.stringify(result?.errors || result?.error || result)}`
+        );
       }
 
-      // TEMP diagnostic - remove once the real response shape is confirmed.
-      console.info('[queue-statistics-modern] /v1/queues/statistics response:', result);
-
-      this.queueData = result;
+      this.queueData = result?.data?.task?.tasks ?? [];
       this.updateTemplate();
       this.isLoading = false;
       this.hasError = false;
@@ -717,30 +753,19 @@ export class QueueStatisticsModern extends LitElement {
    * Update the UI template with current data
    */
   updateTemplate() {  // Made public for demo mode
-    const rawList: any[] | null =
-      this.queueData?.data ?? this.queueData?.queues ?? this.queueData?.items
-      ?? (Array.isArray(this.queueData) ? this.queueData : null);
-
-    if (!Array.isArray(rawList)) {
+    if (!this.queueData || !Array.isArray(this.queueData)) {
       this.queueStats = [];
       return;
     }
 
-    this.queueStats = rawList.map((item: any): QueueStat => {
-      const contacts =
-        item.activeContacts ?? item.contactsInQueue ?? item.waitingContacts
-        ?? item.totalContacts ?? item.contacts ?? 0;
-
-      const rawWait =
-        item.longestWaitTime ?? item.oldestContactWaitTime ?? item.maxWaitTime
-        ?? item.longestWait ?? 0;
-      // Field unit (seconds vs ms) is unconfirmed - treat implausibly large
-      // values as milliseconds.
-      const waitTimeSeconds = rawWait > 100000 ? Math.floor(rawWait / 1000) : Math.floor(rawWait);
+    this.queueStats = this.queueData.map((item: any): QueueStat => {
+      const contacts = item.aggregation?.find((a: any) => a.name === 'contacts')?.value || 0;
+      const oldestStart = item.aggregation?.find((a: any) => a.name === 'oldestStart')?.value || 0;
+      const waitTimeSeconds = oldestStart ? Math.floor((Date.now() - oldestStart) / 1000) : 0;
 
       return {
-        id: item.id ?? item.queueId ?? '',
-        name: item.name ?? item.queueName ?? 'Unknown Queue',
+        id: item.lastQueue?.id || '',
+        name: item.lastQueue?.name || 'Unknown Queue',
         contacts,
         waitTimeSeconds,
         status: this.calculateStatus(contacts, waitTimeSeconds)
