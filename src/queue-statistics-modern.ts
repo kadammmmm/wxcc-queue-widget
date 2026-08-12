@@ -515,7 +515,11 @@ export class QueueStatisticsModern extends LitElement {
   }
 
   private handleOutsideClick = (e: MouseEvent) => {
-    if (this.isPanelOpen && !this.shadowRoot?.contains(e.target as Node)) {
+    // e.target gets retargeted to the host element for listeners outside
+    // the shadow tree, so it's always "not contained" in our own
+    // shadowRoot - composedPath() gives the real, unretargeted path
+    // (including this host element) across the shadow boundary.
+    if (this.isPanelOpen && !e.composedPath().includes(this)) {
       this.isPanelOpen = false;
     }
   };
