@@ -6,12 +6,11 @@ import { property, state } from 'lit/decorators.js';
  *
  * Features:
  * - Real-time queue monitoring with auto-refresh
- * - Per-queue agent roster (name + live status) with graceful fallback
  * - Threshold-based visual alerts (ok/warning/critical)
  * - Configurable warning and critical thresholds
  *
- * No caller/agent data is ever masked or anonymized here - if the API
- * returns a name or number, it is shown as-is.
+ * No caller data is ever masked or anonymized here - if the API returns a
+ * name or number, it is shown as-is.
  */
 
 interface QueueStat {
@@ -20,13 +19,6 @@ interface QueueStat {
   contacts: number;
   waitTimeSeconds: number;
   status: 'ok' | 'warning' | 'critical';
-}
-
-interface AgentRosterEntry {
-  id: string;
-  name: string;
-  state: 'available' | 'oncall' | 'wrapup' | 'unknown';
-  stateDurationSeconds?: number;
 }
 
 export class QueueStatisticsModern extends LitElement {
@@ -55,12 +47,6 @@ export class QueueStatisticsModern extends LitElement {
   // === STATE (internal component data) ===
   @state() private queueStats: QueueStat[] = [];
   @state() queueData?: any;  // Public for demo mode
-  // Per-queue agent roster, keyed by queue id.
-  //   undefined -> not yet fetched
-  //   null      -> fetch attempted but roster could not be obtained (show fallback, never fabricate agents)
-  //   []        -> fetch succeeded, no agents currently assigned
-  //   [...]     -> live roster
-  @state() agentRoster: Map<string, AgentRosterEntry[] | null> = new Map(); // Public for demo mode
   @state() isPanelOpen: boolean = false; // Public for demo mode
   @state() panelPosition: { top: number; left: number } = { top: 0, left: 0 }; // Public for demo mode
   @state() private _dataRefreshTimer?: any;
@@ -367,82 +353,10 @@ export class QueueStatisticsModern extends LitElement {
     }
 
     .tile.tile-pink { background: color-mix(in srgb, var(--pink-600), white 25%); }
-    .tile.tile-available { background: color-mix(in srgb, var(--lblue-600), white 25%); }
-    .tile.tile-active { background: color-mix(in srgb, var(--blue-600), white 20%); color: var(--neutral-white); }
-    .tile.tile-active .stat-label { color: var(--neutral-white); opacity: 0.85; }
 
     .tile.status-ok { background: color-mix(in srgb, var(--turquoise-600), white 25%); }
     .tile.status-warning { background: color-mix(in srgb, var(--yellow-600), white 15%); }
     .tile.status-critical { background: color-mix(in srgb, var(--red-600), white 15%); }
-
-    .roster-section {
-      margin-bottom: 4px;
-    }
-
-    .agent-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 10px 2px;
-      border-bottom: 1px solid var(--neutral-grey);
-      font-size: 13px;
-    }
-
-    .agent-row:last-child {
-      border-bottom: none;
-    }
-
-    .agent-name {
-      font-weight: 600;
-      color: var(--neutral-black);
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .status-pill {
-      flex-shrink: 0;
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-
-    .status-pill.available {
-      background: var(--yellow-600);
-      color: var(--neutral-black);
-    }
-
-    .status-pill.oncall {
-      background: var(--pink-600);
-      color: var(--neutral-black);
-    }
-
-    .status-pill.wrapup {
-      background: var(--neutral-white);
-      border: 1.5px solid var(--neutral-black);
-      color: var(--neutral-black);
-    }
-
-    .status-pill.unknown {
-      background: var(--neutral-grey-light);
-      color: var(--neutral-text-muted);
-      border: 1px solid var(--neutral-grey);
-    }
-
-    .roster-empty,
-    .roster-unavailable {
-      padding: 10px 2px;
-      font-size: 12px;
-      color: var(--neutral-text-muted);
-      font-style: italic;
-      text-align: center;
-    }
 
     .loading-container,
     .error-container,
@@ -644,113 +558,9 @@ export class QueueStatisticsModern extends LitElement {
       this.updateTemplate();
       this.isLoading = false;
       this.hasError = false;
-
-      // Best-effort agent roster refresh - failures are handled internally
-      // and never block or fail the queue stats render.
-      this.getAgentRoster();
     } catch (error) {
       this.handleError(error);
     }
-  }
-
-  /**
-   * Best-effort fetch of the per-queue agent roster (name + live state).
-   *
-   * NOTE: Webex CC's agent-listing API (used for consult/transfer "buddy
-   * agent" lookups) is documented as asynchronous - it can return a 202
-   * and deliver the actual payload over a separate WebSocket notification
-   * subscription. That handshake isn't implemented here because the exact
-   * event/payload shape couldn't be confirmed against live docs. This method
-   * only handles a direct synchronous JSON response. If your org's endpoint
-   * only replies via the async/WebSocket path, this will consistently mark
-   * the roster "unavailable" below - that's expected until this method is
-   * updated against a verified response shape.
-   *
-   * Whatever happens, we never invent agent names or states: a queue with
-   * no usable data renders an explicit "unavailable" state instead.
-   */
-  private async getAgentRoster() {
-    if (this.demoMode || !this.queueStats.length) {
-      return;
-    }
-
-    const headers = {
-      'Authorization': `Bearer ${this.token}`,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    };
-
-    const results = await Promise.all(this.queueStats.map(async (queue) => {
-      if (!queue.id) {
-        return { queueId: queue.id, roster: null as AgentRosterEntry[] | null };
-      }
-      try {
-        const response = await fetch(
-          `https://api.wxcc-us1.cisco.com/organization/${this.orgId}/v1/agents/buddy-agents-list`,
-          {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ queueId: queue.id }),
-            redirect: 'follow',
-            signal: AbortSignal.timeout(5000)
-          }
-        );
-
-        // Async APIs (202 Accepted) require a WebSocket notification
-        // subscription this widget doesn't implement yet - see note above.
-        if (response.status === 202) {
-          console.info(`Agent roster for "${queue.name}" is delivered asynchronously; live status unavailable.`);
-          return { queueId: queue.id, roster: null as AgentRosterEntry[] | null };
-        }
-
-        if (!response.ok) {
-          return { queueId: queue.id, roster: null as AgentRosterEntry[] | null };
-        }
-
-        const result = await response.json();
-        const roster = this.parseAgentRoster(result);
-        return { queueId: queue.id, roster };
-      } catch (error) {
-        console.error(`Error fetching agent roster for queue ${queue.id}:`, error);
-        return { queueId: queue.id, roster: null as AgentRosterEntry[] | null };
-      }
-    }));
-
-    const nextRoster = new Map(this.agentRoster);
-    for (const { queueId, roster } of results) {
-      nextRoster.set(queueId, roster);
-    }
-    this.agentRoster = nextRoster;
-  }
-
-  /**
-   * Normalizes a roster API response into AgentRosterEntry[], tolerating
-   * several plausible field-name variants since the exact schema is
-   * unverified (see getAgentRoster). Returns null if nothing usable is found.
-   */
-  private parseAgentRoster(result: any): AgentRosterEntry[] | null {
-    const rawList: any[] = result?.data ?? result?.agents ?? result?.agentList ?? (Array.isArray(result) ? result : null);
-    if (!Array.isArray(rawList)) {
-      return null;
-    }
-
-    return rawList.map((agent: any): AgentRosterEntry => {
-      const rawState = agent.state ?? agent.agentState ?? agent.status ?? '';
-      return {
-        id: agent.id ?? agent.agentId ?? '',
-        name: agent.name ?? agent.agentName ?? agent.displayName ?? 'Unknown Agent',
-        state: this.normalizeAgentState(rawState),
-        stateDurationSeconds: agent.stateDuration ?? agent.stateDurationSeconds ?? undefined
-      };
-    });
-  }
-
-  private normalizeAgentState(rawState: string): AgentRosterEntry['state'] {
-    const s = (rawState || '').toLowerCase();
-    if (s.includes('available')) return 'available';
-    if (s.includes('wrap')) return 'wrapup';
-    if (s.includes('call') || s.includes('engaged') || s.includes('connect') || s.includes('talk')) return 'oncall';
-    return 'unknown';
   }
 
   /**
@@ -812,15 +622,6 @@ export class QueueStatisticsModern extends LitElement {
       case 'critical': return 'Critical';
       case 'warning': return 'Warning';
       default: return 'OK';
-    }
-  }
-
-  private getStatusPillLabel(state: AgentRosterEntry['state']): string {
-    switch (state) {
-      case 'available': return 'Ready';
-      case 'oncall': return 'In Call';
-      case 'wrapup': return 'Wrap Up';
-      default: return 'Unknown';
     }
   }
 
@@ -943,9 +744,6 @@ export class QueueStatisticsModern extends LitElement {
   }
 
   private renderQueueCard(queue: QueueStat, index: number) {
-    const roster = this.agentRoster.get(queue.id);
-    const available = roster ? roster.filter(a => a.state === 'available').length : null;
-    const activeCalls = roster ? roster.filter(a => a.state === 'oncall').length : null;
     const isEmpty = queue.contacts === 0;
     // Queues with calls show full detail directly; empty ones stay a
     // one-line summary so a long queue list stays scannable.
@@ -981,43 +779,11 @@ export class QueueStatisticsModern extends LitElement {
                 <div class="stat-label">Status</div>
                 <div class="tile-value">${this.getStatusText(queue.status)}</div>
               </div>
-              <div class="tile tile-available">
-                <div class="stat-label">Available</div>
-                <div class="tile-value">${available === null ? '—' : available}</div>
-              </div>
-              <div class="tile tile-active">
-                <div class="stat-label">Active Calls</div>
-                <div class="tile-value">${activeCalls === null ? '—' : activeCalls}</div>
-              </div>
-            </div>
-
-            <div class="roster-section">
-              ${this.renderRoster(roster)}
             </div>
           </div>
         ` : ''}
       </div>
     `;
-  }
-
-  private renderRoster(roster: AgentRosterEntry[] | null | undefined) {
-    if (roster === null) {
-      return html`<div class="roster-unavailable">Agent status unavailable</div>`;
-    }
-    if (!roster || roster.length === 0) {
-      return html`<div class="roster-empty">No agents currently assigned</div>`;
-    }
-
-    return roster.map(agent => html`
-      <div class="agent-row">
-        <span class="agent-name">${agent.name}</span>
-        <span class="status-pill ${agent.state}">
-          ${this.getStatusPillLabel(agent.state)}${agent.state === 'oncall' && agent.stateDurationSeconds != null
-            ? ` (${this.formatWaitTime(agent.stateDurationSeconds)})`
-            : ''}
-        </span>
-      </div>
-    `);
   }
 }
 

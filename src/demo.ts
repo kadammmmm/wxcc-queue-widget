@@ -50,18 +50,6 @@ el.queueData = [
 ];
 el.updateTemplate();
 
-// Agent roster covering: full live roster, empty roster (no agents
-// assigned), and unavailable roster (fetch failed / async-only API).
-const roster = new Map<string, any[] | null>();
-roster.set('q1', [
-  { id: 'a1', name: 'Sarah Jenkins', state: 'available' },
-  { id: 'a2', name: 'Marcus Aurelius', state: 'oncall', stateDurationSeconds: 252 },
-  { id: 'a3', name: 'Elena Rodriguez', state: 'wrapup' }
-]);
-roster.set('q2', []);
-roster.set('q3', null);
-el.agentRoster = roster;
-
 // Open the panel by default so the demo page shows the expanded view,
 // since there's no way to script a click in a static screenshot check.
 el.panelPosition = { top: 44, left: 12 };

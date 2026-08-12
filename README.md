@@ -7,9 +7,8 @@ A real-time queue monitoring widget for Webex Contact Center Agent Desktop, buil
 ## Features
 
 - 🔘 **One compact header indicator** - A single pill, not one element per queue, since the header is shared with many other widgets; shows "No calls in queue" or a short summary of what's waiting
-- 🖱️ **Click to expand** - Opens a floating panel with every queue's detail; queues with calls show full stats + agent roster automatically, empty queues stay a one-line row so a long queue list stays scannable
+- 🖱️ **Click to expand** - Opens a floating panel with every queue's detail; queues with calls show full stats automatically, empty queues stay a one-line row so a long queue list stays scannable
 - 📊 **Real-time queue statistics** - Contacts waiting, longest wait time, and status per queue
-- 🧑‍💻 **Agent roster** - Per-queue agent names and live status (Ready / In Call / Wrap Up), best-effort; shows an explicit "unavailable" state rather than guessing when the data can't be fetched
 - 🚦 **Color-coded status** - OK / Warning / Critical based on configurable thresholds
 - 🔄 **Auto-refresh** - Configurable refresh interval (default: 30 seconds)
 - 🔓 **No masked data** - Names and numbers are shown as returned by the API; nothing is anonymized
@@ -307,10 +306,6 @@ If you see errors like `Unknown type 'TaskAggregation'`:
 1. Check `data-refresh-interval` attribute value
 2. Verify there are no console errors during refresh
 3. Ensure the agent session hasn't expired
-
-### Agent Roster Shows "Agent status unavailable"
-
-The per-agent roster call is best-effort. Webex CC's agent-listing API is documented as asynchronous (it can respond `202 Accepted` and deliver the real payload over a separate WebSocket notification subscription), and that handshake isn't implemented yet - see the comment above `getAgentRoster()` in `src/queue-statistics-modern.ts`. If your token/scope only supports the async path, the roster will consistently show "unavailable" until that method is updated against a confirmed response shape for your org. This is intentional: the widget never fabricates agent names or statuses.
 
 ---
 
