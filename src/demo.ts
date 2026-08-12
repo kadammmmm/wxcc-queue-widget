@@ -16,30 +16,17 @@ document.getElementById('widget-root')!.appendChild(el);
 // clobbered.
 el.isLoading = false;
 
-// Three queues covering ok / warning / critical status.
-el.queueData = [
-  {
-    lastQueue: { id: 'q1', name: 'Support EN' },
-    aggregation: [
-      { name: 'contacts', value: 14 },
-      { name: 'oldestStart', value: Date.now() - (8 * 60 + 22) * 1000 }
-    ]
-  },
-  {
-    lastQueue: { id: 'q2', name: 'Billing' },
-    aggregation: [
-      { name: 'contacts', value: 2 },
-      { name: 'oldestStart', value: Date.now() - 30 * 1000 }
-    ]
-  },
-  {
-    lastQueue: { id: 'q3', name: 'VIP Escalations' },
-    aggregation: [
-      { name: 'contacts', value: 7 },
-      { name: 'oldestStart', value: Date.now() - 130 * 1000 }
-    ]
-  }
-];
+// Three queues covering ok / warning / critical status. Shape mirrors our
+// best guess at GET /v1/queues/statistics's response (see the comment on
+// fetchQueueStatistics() in queue-statistics-modern.ts) - adjust this once
+// the real response shape is confirmed.
+el.queueData = {
+  data: [
+    { id: 'q1', name: 'Support EN', activeContacts: 14, longestWaitTime: 8 * 60 + 22 },
+    { id: 'q2', name: 'Billing', activeContacts: 2, longestWaitTime: 30 },
+    { id: 'q3', name: 'VIP Escalations', activeContacts: 7, longestWaitTime: 130 }
+  ]
+};
 el.updateTemplate();
 
 // Agent roster covering: full live roster, empty roster (no agents

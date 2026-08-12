@@ -54,7 +54,6 @@ export class QueueStatisticsModern extends LitElement {
 
   // === STATE (internal component data) ===
   @state() private queueStats: QueueStat[] = [];
-  @state() private queueFilter: object[] = [];
   @state() queueData?: any;  // Public for demo mode
   // Per-queue agent roster, keyed by queue id.
   //   undefined -> not yet fetched
@@ -395,19 +394,11 @@ export class QueueStatisticsModern extends LitElement {
 
       // Skip API calls in demo mode
       if (!this.demoMode) {
-        if (!this.token || !this.orgId) {
-          this.hasError = true;
-          this.isLoading = false;
-          this.errorMessage = 'Missing token/orgId - check the widget attributes in the Desktop Layout configuration.';
-          return;
-        }
+        await this.fetchQueueStatistics();
 
-        // Fetch all queues the agent can receive calls from
-        await this.getQueues();
-
-        // Start refresh timers
+        // Start refresh timer
         this._dataRefreshTimer = setInterval(
-          () => this.getStats(),
+          () => this.fetchQueueStatistics(),
           this.dataRefreshInterval
         );
       }
@@ -434,162 +425,54 @@ export class QueueStatisticsModern extends LitElement {
   // === API METHODS ===
 
   /**
-   * Fetch all queues the agent is assigned to from three sources:
-   * 1. Team-based queues
-   * 2. Skill-based queues
-   * 3. Agent-assigned queues
+   * Fetch live queue statistics from the Queue Statistics API.
+   *
+   * Unlike most other WxCC endpoints, this one is not org-scoped in the
+   * URL - org is inferred from the token. The exact response field names
+   * are unconfirmed against official docs, so updateTemplate() parses the
+   * result defensively (tries several plausible field-name variants) and
+   * this method logs the raw response once per fetch so the real shape can
+   * be confirmed and the parsing tightened up from there.
    */
-  private async getQueues() {
-    const headers = {
-      'Authorization': `Bearer ${this.token}`,
-      'Content-Type': 'application/json'
-    };
-
-    const paths = [
-      `/v2/contact-service-queue/by-user-id/${this.agentId}/agent-based-queues`,
-      `/v2/contact-service-queue/by-user-id/${this.agentId}/skill-based-queues`,
-      `/team/${this.teamId}/incoming-references`
-    ];
-
-    this.queueFilter = [];
-    let authFailure = false;
-
-    const requestOptions: object = {
-      method: 'GET',
-      headers,
-      redirect: 'follow'
-    };
-
-    // Fetch from all three endpoints
-    const promises = paths.map(async (path) => {
-      try {
-        const response = await fetch(
-          `https://api.wxcc-us1.cisco.com/organization/${this.orgId}${path}`,
-          requestOptions
-        );
-
-        if (response.status === 401 || response.status === 403) {
-          authFailure = true;
-          return;
-        }
-
-        const result = await response.json();
-
-        // Add queue IDs to filter
-        if (result.data && Array.isArray(result.data)) {
-          result.data.forEach((q: any) => {
-            this.queueFilter.push({
-              lastQueue: { id: { equals: q.id } }
-            });
-          });
-        }
-      } catch (error) {
-        console.error(`Error fetching queues from ${path}:`, error);
-      }
-    });
-
-    await Promise.all(promises);
-
-    // If every source failed auth and we have nothing to show, surface that
-    // clearly instead of silently rendering "all queues clear".
-    if (authFailure && !this.queueFilter.length) {
+  private async fetchQueueStatistics() {
+    if (!this.token || !this.orgId) {
       this.hasError = true;
       this.isLoading = false;
-      this.errorMessage = 'Not authorized to load queues (401/403) - the agent token may be missing, expired, or lack the required scope.';
-      return;
-    }
-
-    // Fetch initial statistics
-    await this.getStats();
-  }
-
-  /**
-   * Fetch queue statistics using GraphQL Search API
-   */
-  private async getStats() {
-    if (!this.queueFilter.length) {
-      this.queueData = [];
-      this.isLoading = false;
+      this.errorMessage = 'Missing token/orgId - check the widget attributes in the Desktop Layout configuration.';
       return;
     }
 
     const headers = {
       'Authorization': `Bearer ${this.token}`,
-      'Content-Type': 'application/json',
       'Accept': 'application/json'
     };
 
-    const graphqlQuery = {
-      query: `
-        query queueStats($from: Long!, $to: Long!, $filter: TaskFilters) {
-          task(from: $from, to: $to, filter: $filter) {
-            tasks {
-              lastQueue {
-                id
-                name
-              }
-              aggregation {
-                name
-                value
-              }
-            }
-          }
-        }
-      `,
-      variables: {
-        from: `${Date.now() - 86400000}`,  // 24 hours ago
-        to: `${Date.now()}`,
-        filter: {
-          and: [
-            { isActive: { equals: true } },
-            { status: { equals: "parked" } },
-            { or: this.queueFilter }
-          ]
-        },
-        aggregation: [
-          { field: "id", type: "count", name: "contacts" },
-          { field: "createdTime", type: "min", name: "oldestStart" }
-        ]
-      }
-    };
-
-    const requestOptions: object = {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(graphqlQuery),
-      redirect: 'follow'
-    };
+    const to = Date.now();
+    const from = to - 86400000; // 24 hours ago
 
     try {
       const response = await fetch(
-        'https://api.wxcc-us1.cisco.com/search',
-        requestOptions
+        `https://api.wxcc-us1.cisco.com/v1/queues/statistics?from=${from}&to=${to}`,
+        { method: 'GET', headers, redirect: 'follow' }
       );
 
-      const result = await response.json();
+      const result = await response.json().catch(() => null);
 
-      if (!response.ok || result.errors || result.error) {
-        throw new Error(
-          `Search API request failed (${response.status}): ${JSON.stringify(result.errors || result.error || result)}`
-        );
+      if (!response.ok) {
+        throw new Error(`Queue statistics request failed (${response.status}): ${JSON.stringify(result)}`);
       }
 
-      if (result.data?.task?.tasks) {
-        this.queueData = result.data.task.tasks;
-        this.updateTemplate();
-        this.isLoading = false;
-        this.hasError = false;
+      // TEMP diagnostic - remove once the real response shape is confirmed.
+      console.info('[queue-statistics-modern] /v1/queues/statistics response:', result);
 
-        // Best-effort agent roster refresh - failures are handled internally
-        // and never block or fail the queue stats render.
-        this.getAgentRoster();
-      } else {
-        // No tasks field and no error - treat as "no active contacts".
-        this.queueData = [];
-        this.updateTemplate();
-        this.isLoading = false;
-        this.hasError = false;
-      }
+      this.queueData = result;
+      this.updateTemplate();
+      this.isLoading = false;
+      this.hasError = false;
+
+      // Best-effort agent roster refresh - failures are handled internally
+      // and never block or fail the queue stats render.
+      this.getAgentRoster();
     } catch (error) {
       this.handleError(error);
     }
@@ -699,19 +582,30 @@ export class QueueStatisticsModern extends LitElement {
    * Update the UI template with current data
    */
   updateTemplate() {  // Made public for demo mode
-    if (!this.queueData || !Array.isArray(this.queueData)) {
+    const rawList: any[] | null =
+      this.queueData?.data ?? this.queueData?.queues ?? this.queueData?.items
+      ?? (Array.isArray(this.queueData) ? this.queueData : null);
+
+    if (!Array.isArray(rawList)) {
       this.queueStats = [];
       return;
     }
 
-    this.queueStats = this.queueData.map((item: any) => {
-      const contacts = item.aggregation?.find((a: any) => a.name === 'contacts')?.value || 0;
-      const oldestStart = item.aggregation?.find((a: any) => a.name === 'oldestStart')?.value || 0;
-      const waitTimeSeconds = oldestStart ? Math.floor((Date.now() - oldestStart) / 1000) : 0;
+    this.queueStats = rawList.map((item: any): QueueStat => {
+      const contacts =
+        item.activeContacts ?? item.contactsInQueue ?? item.waitingContacts
+        ?? item.totalContacts ?? item.contacts ?? 0;
+
+      const rawWait =
+        item.longestWaitTime ?? item.oldestContactWaitTime ?? item.maxWaitTime
+        ?? item.longestWait ?? 0;
+      // Field unit (seconds vs ms) is unconfirmed - treat implausibly large
+      // values as milliseconds.
+      const waitTimeSeconds = rawWait > 100000 ? Math.floor(rawWait / 1000) : Math.floor(rawWait);
 
       return {
-        id: item.lastQueue?.id || '',
-        name: item.lastQueue?.name || 'Unknown Queue',
+        id: item.id ?? item.queueId ?? '',
+        name: item.name ?? item.queueName ?? 'Unknown Queue',
         contacts,
         waitTimeSeconds,
         status: this.calculateStatus(contacts, waitTimeSeconds)
