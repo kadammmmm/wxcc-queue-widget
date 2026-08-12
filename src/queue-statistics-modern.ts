@@ -61,6 +61,7 @@ export class QueueStatisticsModern extends LitElement {
   //   []        -> fetch succeeded, no agents currently assigned
   //   [...]     -> live roster
   @state() agentRoster: Map<string, AgentRosterEntry[] | null> = new Map(); // Public for demo mode
+  @state() private expandedQueueIds: Set<string> = new Set();
   @state() private _dataRefreshTimer?: any;
   @state() private _uiRefreshTimer?: any;
   @state() isLoading: boolean = true;  // Public for demo mode
@@ -69,9 +70,15 @@ export class QueueStatisticsModern extends LitElement {
 
   // === STYLES ===
   static styles = css`
+    :host, :host *, :host *::before, :host *::after {
+      box-sizing: border-box;
+    }
+
     :host {
       display: block;
       width: 100%;
+      max-width: 100%;
+      overflow-x: hidden;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
       /* Palette - literal color values only */
@@ -136,20 +143,27 @@ export class QueueStatisticsModern extends LitElement {
     .card-header {
       background: var(--neutral-black);
       color: var(--neutral-white);
-      padding: 14px 20px;
+      padding: 12px 16px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
     }
 
     .queue-title {
       display: flex;
       align-items: center;
-      gap: 10px;
-      font-size: 13px;
+      gap: 8px;
+      font-size: 12px;
       font-weight: 700;
       letter-spacing: 0.5px;
       text-transform: uppercase;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .live-dot {
@@ -166,22 +180,68 @@ export class QueueStatisticsModern extends LitElement {
       50% { opacity: 0.4; }
     }
 
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
     .live-badge {
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
       letter-spacing: 0.5px;
       color: var(--turquoise-600);
     }
 
-    .card-body {
-      padding: 18px 20px 20px;
+    .expand-chevron {
+      font-size: 10px;
+      transition: transform 0.2s ease;
+      display: inline-block;
     }
 
-    .waiting-now-box {
-      border: 2px solid var(--neutral-black);
-      border-radius: 12px;
-      padding: 12px 16px;
-      margin-bottom: 14px;
+    .expand-chevron.open {
+      transform: rotate(180deg);
+    }
+
+    .card-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .summary-status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .summary-status-dot.status-ok { background: var(--turquoise-600); }
+    .summary-status-dot.status-warning { background: var(--yellow-600); }
+    .summary-status-dot.status-critical { background: var(--red-600); }
+
+    .summary-text {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--neutral-black);
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .summary-text.is-empty {
+      color: var(--neutral-text-muted);
+      font-weight: 500;
+    }
+
+    .card-body {
+      padding: 4px 16px 16px;
+      border-top: 1px solid var(--neutral-grey);
     }
 
     .stat-label {
@@ -193,22 +253,16 @@ export class QueueStatisticsModern extends LitElement {
       opacity: 0.7;
     }
 
-    .waiting-now-value {
-      font-size: 40px;
-      font-weight: 800;
-      line-height: 1.1;
-      letter-spacing: -1px;
-      color: var(--neutral-black);
-    }
-
     .tile-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 12px;
-      margin-bottom: 18px;
+      margin-top: 14px;
+      margin-bottom: 16px;
     }
 
     .tile {
+      min-width: 0;
       border-radius: 12px;
       padding: 12px 16px;
       color: var(--neutral-black);
@@ -219,6 +273,9 @@ export class QueueStatisticsModern extends LitElement {
       font-weight: 800;
       letter-spacing: -0.5px;
       line-height: 1.2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .tile.tile-pink { background: color-mix(in srgb, var(--pink-600), white 25%); }
@@ -231,15 +288,14 @@ export class QueueStatisticsModern extends LitElement {
     .tile.status-critical { background: color-mix(in srgb, var(--red-600), white 15%); }
 
     .roster-section {
-      border-top: 1px solid var(--neutral-grey);
-      padding-top: 8px;
-      margin-bottom: 16px;
+      margin-bottom: 4px;
     }
 
     .agent-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 8px;
       padding: 10px 2px;
       border-bottom: 1px solid var(--neutral-grey);
       font-size: 13px;
@@ -252,9 +308,14 @@ export class QueueStatisticsModern extends LitElement {
     .agent-name {
       font-weight: 600;
       color: var(--neutral-black);
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .status-pill {
+      flex-shrink: 0;
       padding: 4px 10px;
       border-radius: 999px;
       font-size: 10px;
@@ -293,25 +354,6 @@ export class QueueStatisticsModern extends LitElement {
       color: var(--neutral-text-muted);
       font-style: italic;
       text-align: center;
-    }
-
-    .manage-btn {
-      width: 100%;
-      padding: 14px;
-      background: var(--neutral-black);
-      color: var(--neutral-white);
-      border: none;
-      border-radius: 10px;
-      font-size: 13px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: background 0.15s ease;
-    }
-
-    .manage-btn:hover {
-      background: #262626;
     }
 
     .loading-container,
@@ -660,12 +702,14 @@ export class QueueStatisticsModern extends LitElement {
     }
   }
 
-  private handleManageQueue(queue: QueueStat) {
-    this.dispatchEvent(new CustomEvent('manage-queue', {
-      detail: { queueId: queue.id, queueName: queue.name },
-      bubbles: true,
-      composed: true
-    }));
+  private toggleQueueExpanded(queueId: string) {
+    const next = new Set(this.expandedQueueIds);
+    if (next.has(queueId)) {
+      next.delete(queueId);
+    } else {
+      next.add(queueId);
+    }
+    this.expandedQueueIds = next;
   }
 
   /**
@@ -723,50 +767,57 @@ export class QueueStatisticsModern extends LitElement {
     const roster = this.agentRoster.get(queue.id);
     const available = roster ? roster.filter(a => a.state === 'available').length : null;
     const activeCalls = roster ? roster.filter(a => a.state === 'oncall').length : null;
+    const expanded = this.expandedQueueIds.has(queue.id);
+    const isEmpty = queue.contacts === 0;
 
     return html`
       <div class="queue-card" style="animation-delay: ${index * 0.05}s">
-        <div class="card-header">
+        <div class="card-header" @click=${() => this.toggleQueueExpanded(queue.id)}>
           <div class="queue-title">
             <span class="live-dot"></span>
             Queue: ${queue.name}
           </div>
-          <span class="live-badge">Live</span>
+          <div class="header-right">
+            <span class="live-badge">Live</span>
+            <span class="expand-chevron ${expanded ? 'open' : ''}">▾</span>
+          </div>
         </div>
 
-        <div class="card-body">
-          <div class="waiting-now-box">
-            <div class="stat-label">Waiting Now</div>
-            <div class="waiting-now-value">${queue.contacts}</div>
-          </div>
-
-          <div class="tile-grid">
-            <div class="tile tile-pink">
-              <div class="stat-label">Longest Wait</div>
-              <div class="tile-value">${this.formatWaitTime(queue.waitTimeSeconds)}</div>
-            </div>
-            <div class="tile status-${queue.status}">
-              <div class="stat-label">Status</div>
-              <div class="tile-value">${this.getStatusText(queue.status)}</div>
-            </div>
-            <div class="tile tile-available">
-              <div class="stat-label">Available</div>
-              <div class="tile-value">${available === null ? '—' : available}</div>
-            </div>
-            <div class="tile tile-active">
-              <div class="stat-label">Active Calls</div>
-              <div class="tile-value">${activeCalls === null ? '—' : activeCalls}</div>
-            </div>
-          </div>
-
-          <div class="roster-section">
-            ${this.renderRoster(roster)}
-          </div>
-
-          <button class="manage-btn" @click=${() => this.handleManageQueue(queue)}>
-            Manage Queue
-          </button>
+        <div class="card-summary" @click=${() => this.toggleQueueExpanded(queue.id)}>
+          <span class="summary-status-dot status-${queue.status}"></span>
+          <span class="summary-text ${isEmpty ? 'is-empty' : ''}">
+            ${isEmpty
+              ? 'No calls waiting'
+              : `${queue.contacts} waiting · longest ${this.formatWaitTime(queue.waitTimeSeconds)}`}
+          </span>
         </div>
+
+        ${expanded ? html`
+          <div class="card-body">
+            <div class="tile-grid">
+              <div class="tile tile-pink">
+                <div class="stat-label">Longest Wait</div>
+                <div class="tile-value">${this.formatWaitTime(queue.waitTimeSeconds)}</div>
+              </div>
+              <div class="tile status-${queue.status}">
+                <div class="stat-label">Status</div>
+                <div class="tile-value">${this.getStatusText(queue.status)}</div>
+              </div>
+              <div class="tile tile-available">
+                <div class="stat-label">Available</div>
+                <div class="tile-value">${available === null ? '—' : available}</div>
+              </div>
+              <div class="tile tile-active">
+                <div class="stat-label">Active Calls</div>
+                <div class="tile-value">${activeCalls === null ? '—' : activeCalls}</div>
+              </div>
+            </div>
+
+            <div class="roster-section">
+              ${this.renderRoster(roster)}
+            </div>
+          </div>
+        ` : ''}
       </div>
     `;
   }

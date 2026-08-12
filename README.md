@@ -1,14 +1,15 @@
 # Webex Contact Center Queue Statistics Widget
 
-A real-time queue monitoring widget for Webex Contact Center Agent Desktop. Displays one card per queue with live stats and an agent roster, sorted by urgency.
+A real-time queue monitoring widget for Webex Contact Center Agent Desktop. Displays one compact row per queue - tap a queue to expand it for full stats and the agent roster - sorted by urgency.
 
 ![Widget Preview](docs/widget-preview.png)
 
 ## Features
 
 - 📊 **Real-time queue statistics** - Contacts waiting, longest wait time, and status per queue
+- 📉 **Collapsed by default** - Each queue is a single compact row ("No calls waiting" or "N waiting"); click a queue to expand it for the full detail (stat tiles + agent roster), so a narrow panel with many queues stays scannable
 - 🧑‍💻 **Agent roster** - Per-queue agent names and live status (Ready / In Call / Wrap Up), best-effort; shows an explicit "unavailable" state rather than guessing when the data can't be fetched
-- 🚦 **Color-coded status** - OK / Warning / Critical tiles based on configurable thresholds
+- 🚦 **Color-coded status** - OK / Warning / Critical based on configurable thresholds
 - 🔄 **Auto-refresh** - Configurable refresh interval (default: 30 seconds)
 - 📜 **Multi-queue support** - Stacked, scrollable cards sorted by priority (critical first)
 - 🔓 **No masked data** - Names and numbers are shown as returned by the API; nothing is anonymized
@@ -218,8 +219,6 @@ To display the widget directly in a panel (always visible, no tab):
   }
 }
 ```
-
-Listen for the `manage-queue` custom event (bubbles, composed) to wire up your own "Manage Queue" action - it fires with `event.detail.queueId` and `event.detail.queueName`.
 
 ### 4. Save and Publish
 

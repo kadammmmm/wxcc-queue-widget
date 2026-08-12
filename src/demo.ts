@@ -16,15 +16,16 @@ document.getElementById('widget-root')!.appendChild(el);
 // clobbered.
 el.isLoading = false;
 
-// Three queues covering ok / warning / critical status. Shape mirrors our
-// best guess at GET /v1/queues/statistics's response (see the comment on
-// fetchQueueStatistics() in queue-statistics-modern.ts) - adjust this once
-// the real response shape is confirmed.
+// Four queues covering ok / warning / critical status plus an empty one.
+// Shape mirrors our best guess at GET /v1/queues/statistics's response (see
+// the comment on fetchQueueStatistics() in queue-statistics-modern.ts) -
+// adjust this once the real response shape is confirmed.
 el.queueData = {
   data: [
     { id: 'q1', name: 'Support EN', activeContacts: 14, longestWaitTime: 8 * 60 + 22 },
     { id: 'q2', name: 'Billing', activeContacts: 2, longestWaitTime: 30 },
-    { id: 'q3', name: 'VIP Escalations', activeContacts: 7, longestWaitTime: 130 }
+    { id: 'q3', name: 'VIP Escalations', activeContacts: 7, longestWaitTime: 130 },
+    { id: 'q4', name: 'After Hours', activeContacts: 0, longestWaitTime: 0 }
   ]
 };
 el.updateTemplate();
@@ -40,7 +41,3 @@ roster.set('q1', [
 roster.set('q2', []);
 roster.set('q3', null);
 el.agentRoster = roster;
-
-el.addEventListener('manage-queue', (e: Event) => {
-  console.log('manage-queue', (e as CustomEvent).detail);
-});
