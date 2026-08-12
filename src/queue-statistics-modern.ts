@@ -395,6 +395,13 @@ export class QueueStatisticsModern extends LitElement {
 
       // Skip API calls in demo mode
       if (!this.demoMode) {
+        if (!this.token || !this.orgId) {
+          this.hasError = true;
+          this.isLoading = false;
+          this.errorMessage = 'Missing token/orgId - check the widget attributes in the Desktop Layout configuration.';
+          return;
+        }
+
         // Fetch all queues the agent can receive calls from
         await this.getQueues();
 
@@ -445,6 +452,7 @@ export class QueueStatisticsModern extends LitElement {
     ];
 
     this.queueFilter = [];
+    let authFailure = false;
 
     const requestOptions: object = {
       method: 'GET',
@@ -459,6 +467,12 @@ export class QueueStatisticsModern extends LitElement {
           `https://api.wxcc-us1.cisco.com/organization/${this.orgId}${path}`,
           requestOptions
         );
+
+        if (response.status === 401 || response.status === 403) {
+          authFailure = true;
+          return;
+        }
+
         const result = await response.json();
 
         // Add queue IDs to filter
@@ -475,6 +489,15 @@ export class QueueStatisticsModern extends LitElement {
     });
 
     await Promise.all(promises);
+
+    // If every source failed auth and we have nothing to show, surface that
+    // clearly instead of silently rendering "all queues clear".
+    if (authFailure && !this.queueFilter.length) {
+      this.hasError = true;
+      this.isLoading = false;
+      this.errorMessage = 'Not authorized to load queues (401/403) - the agent token may be missing, expired, or lack the required scope.';
+      return;
+    }
 
     // Fetch initial statistics
     await this.getStats();
@@ -545,6 +568,12 @@ export class QueueStatisticsModern extends LitElement {
 
       const result = await response.json();
 
+      if (!response.ok || result.errors || result.error) {
+        throw new Error(
+          `Search API request failed (${response.status}): ${JSON.stringify(result.errors || result.error || result)}`
+        );
+      }
+
       if (result.data?.task?.tasks) {
         this.queueData = result.data.task.tasks;
         this.updateTemplate();
@@ -554,6 +583,12 @@ export class QueueStatisticsModern extends LitElement {
         // Best-effort agent roster refresh - failures are handled internally
         // and never block or fail the queue stats render.
         this.getAgentRoster();
+      } else {
+        // No tasks field and no error - treat as "no active contacts".
+        this.queueData = [];
+        this.updateTemplate();
+        this.isLoading = false;
+        this.hasError = false;
       }
     } catch (error) {
       this.handleError(error);
